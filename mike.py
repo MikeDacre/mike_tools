@@ -10,7 +10,7 @@
 #       LICENSE: Open Source - Public - Do as you wish (no license) - Mike Dacre
 #       VERSION: 0.1
 #       CREATED: 2013-08-26 10:39
-# Last modified: 2013-08-26 12:59
+# Last modified: 2013-08-26 13:12
 #
 #   DESCRIPTION: General functions that I use in my scripts
 #
@@ -61,7 +61,9 @@ def logme(output, logfile='', print_level=0):
             elif getattr(logfile, 'name') == '<stdout>':
                 finalfile = logfile
                 stdout = True
-            elif not getattr(logfile, 'mode') == 'a':
+            elif getattr(logfile, 'mode') == 'a':
+                finalfile = logfile
+            else:
                 logfile.close()
                 finalfile = open(logfile, 'a')
             print(output, file=finalfile)
