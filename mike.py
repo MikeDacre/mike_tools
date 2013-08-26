@@ -10,7 +10,7 @@
 #       LICENSE: Open Source - Public - Do as you wish (no license) - Mike Dacre
 #       VERSION: 0.1
 #       CREATED: 2013-08-26 10:39
-# Last modified: 2013-08-26 10:49
+# Last modified: 2013-08-26 11:29
 #
 #   DESCRIPTION: General functions that I use in my scripts
 #
@@ -19,4 +19,18 @@
 #====================================================================================
 """
 
+def logme(logfile):
+    """ Take either a string or a filehandle, detect if string.
+        If string, open as file in append mode.
+        If file, get name, close file, and reopen in append mode
+        Return resulting file"""
+    if isinstance(logfile, str):
+        finalfile = open(logfile, 'a')
+    elif not getattr(logfile, 'mode') == 'a':
+        logfile.close()
+        finalfile = open(logfile, 'a')
+    else:
+        finalfile = logfile
+
+    return logfile
 
