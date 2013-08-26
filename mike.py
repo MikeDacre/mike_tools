@@ -10,7 +10,7 @@
 #       LICENSE: Open Source - Public - Do as you wish (no license) - Mike Dacre
 #       VERSION: 0.1
 #       CREATED: 2013-08-26 10:39
-# Last modified: 2013-08-26 13:12
+# Last modified: 2013-08-26 14:28
 #
 #   DESCRIPTION: General functions that I use in my scripts
 #
@@ -54,22 +54,25 @@ def logme(output, logfile='', print_level=0):
         if isinstance(logfile, str):
             with open(logfile, 'a') as outfile:
                 print(output, file=outfile)
-        else:
-            if getattr(logfile, 'name') == '<stderr>':
-                finalfile = logfile
-                stderr = True
-            elif getattr(logfile, 'name') == '<stdout>':
-                finalfile = logfile
-                stdout = True
-            elif getattr(logfile, 'mode') == 'a':
-                finalfile = logfile
+        elif getattr(logfile, 'name') == '<stderr>':
+            print(output, file=logfile)    
+            stderr = True
+        elif getattr(logfile, 'name') == '<stdout>':
+            print(output, file=logfile)    
+            stdout = True
+        elif getattr(logfile, 'mode') == 'a':
+            if getattr(logfile, 'closed'):
+                with open(logfile.name, 'a') as outfile:
+                    print(output, file=outfile)
             else:
-                logfile.close()
-                finalfile = open(logfile, 'a')
-            print(output, file=finalfile)
-            finalfile.close()
+                print(output, file=logfile)
+        else:
+            logfile.close()
+            with open(logfile, 'a') as outfile:
+                print(output, file=outfile)
     else:
         print(output, file=sys.stderr)
+        stderr = True
 
     if print_level == 1 and not stdout:
         print(output)
