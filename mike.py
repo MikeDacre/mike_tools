@@ -10,7 +10,7 @@
 #       LICENSE: Open Source - Public - Do as you wish (no license) - Mike Dacre
 #       VERSION: 0.1
 #       CREATED: 2013-08-26 10:39
-# Last modified: 2013-08-26 11:38
+# Last modified: 2013-08-26 11:44
 #
 #   DESCRIPTION: General functions that I use in my scripts
 #
@@ -19,7 +19,7 @@
 #====================================================================================
 """
 
-def logme(logfile):
+def open_log(logfile):
     """ Take either a string or a filehandle, detect if string.
         If string, open as file in append mode.
         If file, get name, close file, and reopen in append mode
@@ -35,4 +35,21 @@ def logme(logfile):
         raise Exception "logfile is not valid"
 
     return logfile
+
+def logme(output, logfile):
+    """Print a string to logfile"""
+
+    output = str(output)
+
+    if isinstance(logfile, str):
+        with open(logfile, 'a') as outfile:
+            print(output, outfile)
+    else:
+        if getattr(logfile, 'name') == '<stderr>' or getattr(logfile, 'name') == '<stdout>':
+            finalfile = logfile
+        elif not getattr(logfile, 'mode') == 'a':
+            logfile.close()
+            finalfile = open(logfile, 'a')
+        print(output, finalfile)
+        finalfile.close()
 
