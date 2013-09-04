@@ -10,7 +10,7 @@
 #       LICENSE: Open Source - Public - Do as you wish (no license) - Mike Dacre
 #       VERSION: 0.1
 #       CREATED: 2013-08-26 10:39
-# Last modified: 2013-09-04 15:22
+# Last modified: 2013-09-04 15:39
 #
 #   DESCRIPTION: General functions that I use in my scripts
 #
@@ -18,13 +18,13 @@
 #
 #====================================================================================
 """
+import sys
 
 def open_log(logfile=''):
     """ Take either a string or a filehandle, detect if string.
         If string, open as file in append mode.
         If file, get name, close file, and reopen in append mode
         Return resulting file"""
-    import sys
 
     if logfile:
         if isinstance(logfile, str):
@@ -43,7 +43,7 @@ def open_log(logfile=''):
 
 def logme(output, logfile='', print_level=0):
     """Print a string to logfile"""
-    import datetime,sys
+    import datetime
 
     timestamp   = datetime.datetime.now().strftime("%Y%m%d %H:%M:%S")
     output      = str(output)
@@ -83,6 +83,7 @@ def logme(output, logfile='', print_level=0):
 
 def pbs_submit(command, name='', template=''):
     """Take a command and an optional template and submit it to PBS. Return job number"""
+
     if not template:
         template = """#!/bin/bash 
 #PBS -S /bin/bash
@@ -114,12 +115,12 @@ def qstat_mon(job_list, verbose=False, logfile=sys.stderr):
         Returns a tuple with success/failure and dictionary of exit codes
         If an exit code is not positive, will return failure as false
     """
-    import subprocess, sys
+    import subprocess, re
     from time import sleep
 
     # Make a dictionary
     final_list = {}
-    if isinstance(job_list, list):
+    if isinstance(job_list, list) or isinstance(job_list, tuple):
         for i in job_list:
             final_list[i] = i
     elif isinstance(job_list, dict):
@@ -128,13 +129,18 @@ def qstat_mon(job_list, verbose=False, logfile=sys.stderr):
         logme("qstat_mon: Job list is not a valid list or dictionary", logfile, 2)
         return False, final_list
 
+    if verbose:
+        logme(' '.join(["Monitoring", str(len(final_list)), "jobs"]), logfile, 2)
+    else:
+        logme(' '.join(["Monitoring", str(len(final_list)), "jobs"]), logfile)
+
     # Check jobs, raise exception if any fail, otherwise we are done
     complete_jobs = {}
     while 1:
         for name, job_number in final_list.items():
             if name not in complete_jobs.keys():
-                if re.search(r'C default', subprocess.check_output(['qstat', job_number]).decode().rstrip()):
-                    exit_code = re.findall(r'exit_status = ([0-9]+)', subprocess.check_output(['qstat', '-f', job_number]).decode())[0]
+                if re.search(r'C default', subprocess.check_output(['qstat', str(job_number)]).decode().rstrip()):
+                    exit_code = re.findall(r'exit_status = ([0-9]+)', subprocess.check_output(['qstat', '-f', str(job_number)]).decode())[0]
                     complete_jobs[name] = exit_code
                     if verbose:
                         logme(' '.join([name, "completed"]), logfile, 2)
