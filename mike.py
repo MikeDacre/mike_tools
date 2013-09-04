@@ -10,7 +10,7 @@
 #       LICENSE: Open Source - Public - Do as you wish (no license) - Mike Dacre
 #       VERSION: 0.1
 #       CREATED: 2013-08-26 10:39
-# Last modified: 2013-09-04 15:39
+# Last modified: 2013-09-04 16:37
 #
 #   DESCRIPTION: General functions that I use in my scripts
 #
@@ -122,7 +122,7 @@ def qstat_mon(job_list, verbose=False, logfile=sys.stderr):
     final_list = {}
     if isinstance(job_list, list) or isinstance(job_list, tuple):
         for i in job_list:
-            final_list[i] = i
+            final_list[str(i)] = i
     elif isinstance(job_list, dict):
         final_list = job_list
     else:
@@ -139,7 +139,7 @@ def qstat_mon(job_list, verbose=False, logfile=sys.stderr):
     while 1:
         for name, job_number in final_list.items():
             if name not in complete_jobs.keys():
-                if re.search(r'C default', subprocess.check_output(['qstat', str(job_number)]).decode().rstrip()):
+                if re.search(r' C ', subprocess.check_output(['qstat', str(job_number)]).decode().rstrip()):
                     exit_code = re.findall(r'exit_status = ([0-9]+)', subprocess.check_output(['qstat', '-f', str(job_number)]).decode())[0]
                     complete_jobs[name] = exit_code
                     if verbose:
