@@ -14,7 +14,7 @@
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.1
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-22 13:07
+ Last modified: 2014-01-22 14:12
 
    DESCRIPTION: Take a compressed vcf file such as 
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -22,7 +22,7 @@
                 as 0/1/2 where 0: homozygote_1; 1:heterozygote; 2: homozygote_2.
 
                 Out file format (tab delimited):
-                SNP_ID(e.g.rs58108140)\tCHR(e.g.1/MT)\tPOS(e.g.10583)\tref\talt\tqual\tfilter\t[sample_1]\t[sample_2]\t...\t[sample_n]
+                CHR(e.g.1/MT)\\tPOS(e.g.10583)\\tSNP_ID(e.g.rs58108140)\\tref\\talt\\tqual\\tfilter\\t[sample_1]\\t[sample_2]\\t...\\t[sample_n]
 
   REQUIREMENTS: 1. A 1000genomes-style VCF file with GT:DS:GL style genotypes (see note)
                 2. A 1000genomes-style panel file 
@@ -34,9 +34,6 @@
  USAGE EXAMPLE: ./vcf_simplify.py -p integrated_call_samples.20101123.ALL.panel\
                 ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz\
                 ALL.chr2.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
-
-       OUTPUTS: Files by chromosome and population, e.g.:
-                CEU_chr1.txt.gz, CEU_chr2.txt.gz, YRI_chr1.txt.gz, YRI_chr2.txt.gz
 
 ====================================================================================
 """
