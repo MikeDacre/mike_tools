@@ -6,15 +6,15 @@
 #
 # Distributed under terms of the MIT license
 """
-====================================================================================
+================================================================================================
 
-          FILE: vcf_simplify (python 3)
+          FILE: vcf_simplify (python 3) (multithreading)
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-22 19:56
+ Last modified: 2014-01-22 20:07
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -27,18 +27,25 @@
                 Execution time on a single 1000genomes file is
                 2647.92s user 9.00s system 97% cpu 45:16.76 total
 
-  REQUIREMENTS: 1. A 1000genomes-style VCF file with GT:DS:GL style genotypes (see note)
-                2. A 1000genomes-style panel file
-                    ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/integrated_call_samples.20101123.ALL.panel
+                Additionally, it is possible to filter a 1000genomes style vcf file, or 
+                a previously simplified vcf file by population, region, or platform.
+                Filtering requires a 1000genomes style panel file, such as:
+                ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/integrated_call_samples.20101123.ALL.panel
 
           NOTE: The vcf files must be gzipped, and the genotypes must be encoded as
-                0|0, 0|1, 1|1
+                0|0, 0|1, 1|0, 1|1
 
- USAGE EXAMPLE: ./vcf_simplify.py -p integrated_call_samples.20101123.ALL.panel\
-                ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz\
+USAGE EXAMPLES: Simply vcf files:
+                ./vcf_simplify.py ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz\\
                 ALL.chr2.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
 
-====================================================================================
+                Filter 1000genomes vcf files by population:
+                ./vcf_simplify.py -p integrated_call_samples.20101123.ALL.panel\\
+                --filter_population CEU,YRI \\
+                ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz\\
+                ALL.chr2.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
+
+=============================================================================================
 """
 import sys, re
 from multiprocessing import Pool
