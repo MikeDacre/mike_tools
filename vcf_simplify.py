@@ -14,7 +14,7 @@
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-22 20:07
+ Last modified: 2014-01-23 08:39
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -47,7 +47,7 @@ USAGE EXAMPLES: Simply vcf files:
 
 =============================================================================================
 """
-import sys, re
+import gzip, sys, re
 from multiprocessing import Pool
 
 # Default threads
@@ -58,7 +58,6 @@ def vcf_simplify(vcf_file, logfile=sys.stderr, verbose=False, outfile=''):
        simplify it to:
 
        chr\\tpos\\trsID\\tref\\talt\\tqual\\tfilter\\tsample_1\\t[sample_2]\\t...[sample_n]\\n"""
-    import gzip
 
     # Open logfile
     if isinstance(logfile, str):
@@ -188,7 +187,6 @@ def filter(file_list, population_list, panel_file, threads=default_threads, verb
 def _filter(vcf_file, population_list, sample_info):
     """A private function to run the meat of the filtering
        Requires gzipped files like everything else"""
-    import gzip
      
     # Get an outfile name:
     outfile = re.sub('.vcf.gz$','', vcf_file) + '_' + '_'.join(population_list) + '.vcf.gz'
@@ -303,7 +301,7 @@ def _logme(output, logfile=sys.stderr, print_level=0):
  
 def _get_args():
     """Command Line Argument Parsing"""
-    import argparse, sys
+    import argparse
 
     parser = argparse.ArgumentParser(
                  description=__doc__,
