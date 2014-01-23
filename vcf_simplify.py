@@ -14,7 +14,7 @@
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-23 08:39
+ Last modified: 2014-01-23 15:43
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -274,25 +274,28 @@ def _logme(output, logfile=sys.stderr, print_level=0):
     stderr = False
     stdout = False
 
-    if isinstance(logfile, str):
-        with open(logfile, 'a') as outfile:
-            print(timeput, file=outfile)
-    elif getattr(logfile, 'name') == '<stderr>':
-        print(timeput, file=logfile)
-        stderr = True
-    elif getattr(logfile, 'name') == '<stdout>':
-        print(timeput, file=logfile)
-        stdout = True
-    elif getattr(logfile, 'mode') == 'a':
-        if getattr(logfile, 'closed'):
-            with open(logfile.name, 'a') as outfile:
+    try:
+        if isinstance(logfile, str):
+            with open(logfile, 'a') as outfile:
                 print(timeput, file=outfile)
-        else:
+        elif getattr(logfile, 'name') == '<stderr>':
             print(timeput, file=logfile)
-    else:
-        logfile.close()
-        with open(logfile, 'a') as outfile:
-            print(timeput, file=outfile)
+            stderr = True
+        elif getattr(logfile, 'name') == '<stdout>':
+            print(timeput, file=logfile)
+            stdout = True
+        elif getattr(logfile, 'mode') == 'a':
+            if getattr(logfile, 'closed'):
+                with open(logfile.name, 'a') as outfile:
+                    print(timeput, file=outfile)
+            else:
+                print(timeput, file=logfile)
+        else:
+            logfile.close()
+            with open(logfile, 'a') as outfile:
+                print(timeput, file=outfile)
+    except AttributeError:
+        pass
 
     if print_level == 1 and not stdout:
         print(output)
