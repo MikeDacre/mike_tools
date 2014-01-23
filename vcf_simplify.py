@@ -12,9 +12,9 @@
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        LICENSE: MIT License, Property of Stanford, Use however you wish
-       VERSION: 0.2
+       VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-22 19:55
+ Last modified: 2014-01-22 19:56
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
