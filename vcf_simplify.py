@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8 tabstop=4 expandtab shiftwidth=4 softtabstop=4
 #
@@ -12,9 +12,9 @@
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        LICENSE: MIT License, Property of Stanford, Use however you wish
-       VERSION: 0.1
+       VERSION: 0.2
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-22 14:12
+ Last modified: 2014-01-22 18:13
 
    DESCRIPTION: Take a compressed vcf file such as 
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -23,6 +23,9 @@
 
                 Out file format (tab delimited):
                 CHR(e.g.1/MT)\\tPOS(e.g.10583)\\tSNP_ID(e.g.rs58108140)\\tref\\talt\\tqual\\tfilter\\t[sample_1]\\t[sample_2]\\t...\\t[sample_n]
+                
+                Execution time on a single 1000genomes file is
+                2647.92s user 9.00s system 97% cpu 45:16.76 total
 
   REQUIREMENTS: 1. A 1000genomes-style VCF file with GT:DS:GL style genotypes (see note)
                 2. A 1000genomes-style panel file 
@@ -39,13 +42,20 @@
 """
 import sys, re
 
-def vcf_simplify(vcf_file, outfile='', logfile=sys.stderr, verbose=False):
+# Default threads
+default_threads = 8
+
+def vcf_simplify(vcf_file, logfile=sys.stderr, verbose=False, outfile=''):
     """Take a 1000genomes style vcf file (MUST BE GZIPPED) and 
        simplify it to:
        
        rsID\\tchr\\tpos\\tref\\talt\\tqual\\tfilter\\tsample_1\\t[sample_2]\\t...[sample_n]\\n"""
     import gzip
 
+    # Open logfile
+    if isinstance(logfile, str):
+        logfile = open(logfile, 'a')
+        
     # Get an outfile name:
     if not outfile:
         outfile = re.sub('.vcf.gz$','', vcf_file) + '_simplified.vcf.gz'
@@ -126,6 +136,10 @@ def parse_panel_file(panel_file, logfile=sys.stderr, verbose=False):
        e.g.:
        ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/integrated_call_samples.20101123.ALL.panel"""
 
+    # Open logfile
+    if isinstance(logfile, str):
+        logfile = open(logfile, 'a')
+
     sample_info = {}
     with open(panel_file, 'r') as infile:
         for line in infile:
@@ -192,16 +206,20 @@ def _get_args():
                         help="Panel file, see example above")
      
     # Optional Arguments
+    parser.add_argument('-t', '--threads', nargs='?', default=default_threads,
+                        help=''.join(["Threading, for running on multiple files. ",
+                                      "Default: ", str(default_threads)]) )
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
-    parser.add_argument('-l', '--logfile', nargs='?', default=sys.stderr, 
-                        type=argparse.FileType('a'),
+    parser.add_argument('-l', '--logfile', 
                         help="Optional log file for verbose output, Default STDERR (append mode)")
     
     return parser
 
 # Main function for direct running
 def main():
-    """Run directly"""
+    """Run directly - use multithreading"""
+    from multiprocessing import Pool
+
     # Get commandline arguments
     parser = _get_args()
     args = parser.parse_args()
@@ -210,9 +228,17 @@ def main():
     if args.panel_file:
         sample_info = parse_panel_file(args.panel_file, logfile=args.logfile, verbose=args.verbose)    
 
+    # Get threads
+    pool = Pool(processes=int(args.threads))
+    running_processes = []
+
     # Parse vcf file into simple version
     for vcf_file in args.infiles:
-        vcf_simplify(vcf_file, verbose=args.verbose, logfile=args.logfile)
+        running_processes.append(pool.apply_async(vcf_simplify, (vcf_file, args.logfile, args.verbose)) )
+
+    # Run threads
+    for process in running_processes:
+        process.get()
 
 # The end
 if __name__ == '__main__':
