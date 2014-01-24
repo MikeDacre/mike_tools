@@ -14,7 +14,7 @@
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-23 15:43
+ Last modified: 2014-01-23 16:36
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -48,24 +48,22 @@ USAGE EXAMPLES: Simply vcf files:
 =============================================================================================
 """
 import gzip, sys, re
+from os import path
 from multiprocessing import Pool
 
 # Default threads
 default_threads = 8
 
-def vcf_simplify(vcf_file, logfile=sys.stderr, verbose=False, outfile=''):
+def vcf_simplify(vcf_file, output_directory='.', logfile=sys.stderr, verbose=False):
     """Take a 1000genomes style vcf file (MUST BE GZIPPED) and
        simplify it to:
 
        chr\\tpos\\trsID\\tref\\talt\\tqual\\tfilter\\tsample_1\\t[sample_2]\\t...[sample_n]\\n"""
 
-    # Open logfile
-    if isinstance(logfile, str):
-        logfile = open(logfile, 'a')
 
     # Get an outfile name:
-    if not outfile:
-        outfile = re.sub('.vcf.gz$','', vcf_file) + '_simplified.vcf.gz'
+    outfile = re.sub('.vcf.gz$','', path.basename(vcf_file)) + '_simplified.vcf.gz'
+    outfile = path.realpath(output_directory) + '/' + outfile
 
     with gzip.open(vcf_file, 'rb') as infile:
 
@@ -111,7 +109,7 @@ def vcf_simplify(vcf_file, logfile=sys.stderr, verbose=False, outfile=''):
 
                 # Parse individuals
                 for individual in range(9, len(fields)):
-                    genotype = fields[:qindividual].split(':')[0]
+                    genotype = fields[individual].split(':')[0]
                     if genotype == '0|0':
                         # Homozygote 1
                         outstring.append('0')
@@ -159,15 +157,14 @@ def parse_panel_file(panel_file, logfile=sys.stderr, verbose=False):
 
     return(sample_info)
 
-def filter(file_list, population_list, panel_file, threads=default_threads, verbose=False, logfile=sys.stderr):
+def filter(file_list, population_list, panel_file, output_directory='.', threads=default_threads, verbose=False, logfile=sys.stderr):
     """Filter provided vcf files based on population.
        Works on either original or simplified vcf files
        Works threaded, uses the _filter private function for
        actual processing"""
 
-    # Open logfile
-    if isinstance(logfile, str):
-        logfile = open(logfile, 'a')
+    # Get full path to output directory
+    output_directory = path.realpath(output_directory)
 
     # Get sample info from panel file
     sample_info = parse_panel_file(panel_file, logfile=logfile, verbose=verbose)
@@ -178,18 +175,19 @@ def filter(file_list, population_list, panel_file, threads=default_threads, verb
 
     # Queue up the private function threads
     for vcf_file in file_list:
-        running_processes.append(pool.apply_async(_filter, (vcf_file, population_list, sample_info)))
+        running_processes.append(pool.apply_async(_filter, (vcf_file, population_list, sample_info, output_directory)))
 
     # Run the threads
     for process in running_processes:
         process.get()
 
-def _filter(vcf_file, population_list, sample_info):
+def _filter(vcf_file, population_list, sample_info, output_directory):
     """A private function to run the meat of the filtering
        Requires gzipped files like everything else"""
      
     # Get an outfile name:
-    outfile = re.sub('.vcf.gz$','', vcf_file) + '_' + '_'.join(population_list) + '.vcf.gz'
+    outfile = re.sub('.vcf.gz$','', path.basename(vcf_file)) + '_' + '_'.join(population_list) + '.vcf.gz'
+    outfile = path.realpath(output_directory) + '/' + outfile
     
     with gzip.open(vcf_file, 'rb') as infile:
         # Check if this is 1000genomes or simplified
@@ -324,6 +322,8 @@ def _get_args():
     parser.add_argument('-t', '--threads', nargs='?', default=default_threads,
                         help=''.join(["Threading, for running on multiple files. ",
                                       "Default: ", str(default_threads)]) )
+    parser.add_argument('-o', '--output_directory', 
+                        help="Directory to place output files. Default is current working directory")
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
     parser.add_argument('-l', '--logfile',
                         help="Optional log file for verbose output, Default STDERR (append mode)")
@@ -333,7 +333,6 @@ def _get_args():
 # Main function for direct running
 def main():
     """Run directly - use multithreading"""
-    from os import path
 
     # Get commandline arguments
     parser = _get_args()
@@ -342,6 +341,12 @@ def main():
     # Run in filtering mode if filter is selected
     panel_file      = ''
     population_list = ''
+
+    # Choose output Directory
+    if args.output_directory:
+        output_directory = path.realpath(args.output_directory)
+    else:
+        output_directory = path.realpath('.')
 
     if args.filter_population:
         # Make sure panel file exists
@@ -356,7 +361,7 @@ def main():
             sys.exit(1)
 
         # Run filtering
-        filter(args.infiles, population_list, panel_file, args.threads, args.verbose, args.logfile)
+        filter(args.infiles, population_list, panel_file, output_directory, args.threads, args.verbose, args.logfile)
 
     # Otherwise parse vcf file into simple version
     else:
@@ -366,7 +371,7 @@ def main():
 
         # Queue up the vcf_simplify instances
         for vcf_file in args.infiles:
-            running_processes.append(pool.apply_async(vcf_simplify, (vcf_file, args.logfile, args.verbose)) )
+            running_processes.append(pool.apply_async(vcf_simplify, (vcf_file, output_directory, args.logfile, args.verbose)) )
 
         # Run threads
         for process in running_processes:
