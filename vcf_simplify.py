@@ -6,7 +6,7 @@
 #
 # Distributed under terms of the MIT license
 """
-================================================================================================
+===============================================================================
 
           FILE: vcf_simplify (python 3) (multithreading)
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
@@ -14,12 +14,13 @@
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-23 16:36
+ Last modified: 2014-01-28 22:58
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
-                and create a simplified matrix where all genotypes are represented
-                as 0/1/2 where 0: homozygote_1; 1:heterozygote; 2: homozygote_2.
+                and create a simplified matrix where all genotypes are
+                represented as 0/1/2 where 0: homozygote_1; 1:heterozygote;
+                2: homozygote_2.
 
                 Out file format (tab delimited):
                 CHR(e.g.1/MT)\\tPOS(e.g.10583)\\tSNP_ID(e.g.rs58108140)\\tref\\talt\\tqual\\tfilter\\t[sample_1]\\t[sample_2]\\t...\\t[sample_n]
@@ -27,13 +28,14 @@
                 Execution time on a single 1000genomes file is
                 2647.92s user 9.00s system 97% cpu 45:16.76 total
 
-                Additionally, it is possible to filter a 1000genomes style vcf file, or 
-                a previously simplified vcf file by population, region, or platform.
+                Additionally, it is possible to filter a 1000genomes style
+                vcf file, or a previously simplified vcf file by population,
+                region, or platform.
                 Filtering requires a 1000genomes style panel file, such as:
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/integrated_call_samples.20101123.ALL.panel
 
-          NOTE: The vcf files must be gzipped, and the genotypes must be encoded as
-                0|0, 0|1, 1|0, 1|1
+          NOTE: The vcf files must be gzipped, and the genotypes must be encoded
+                as 0|0, 0|1, 1|0, 1|1
 
 USAGE EXAMPLES: Simply vcf files:
                 ./vcf_simplify.py ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz\\
@@ -69,8 +71,10 @@ def vcf_simplify(vcf_file, output_directory='.', logfile=sys.stderr, verbose=Fal
 
         # Check file format
         if not infile.readline().decode('utf8').rstrip() == '##fileformat=VCFv4.1':
-            _logme(' '.join(["\n\nERROR: File", vcf_file, "does not have '##fileformat=VCFv4.1'",
-                            "as its first line, not processing.\n\n"]), logfile, 2)
+            _logme(' '.join(["\n\nERROR: File", vcf_file,
+                             " does not have '##fileformat=VCFv4.1'",
+                             " as its first line, not processing.\n\n"]),
+                   logfile, 2)
             return
 
         # Ignore comment lines and get header
@@ -87,8 +91,8 @@ def vcf_simplify(vcf_file, output_directory='.', logfile=sys.stderr, verbose=Fal
         h = header.split('\t')
         if not h[0:7] == ['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER']:
             _logme(' '.join(["ERROR:",  vcf_file, "header is\n", h, "\nit should be\n",
-                                "['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER']\n",
-                                "Aborting\n\n"]), logfile, 2)
+                             "['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER']\n",
+                             "Aborting\n\n"]), logfile, 2)
             return
 
         # Parse the rest of the file and print the output
@@ -121,9 +125,12 @@ def vcf_simplify(vcf_file, output_directory='.', logfile=sys.stderr, verbose=Fal
                         outstring.append('2')
                     else:
                         # Throw ERROR
-                        error_string = ''.join(["ERROR: Individual ", str(individual),
-                                        " in SNP ", fields[2], "did not have a known genotype.\n",
-                                        "Reported genotype was: ", genotype])
+                        error_string = ''.join(["ERROR: Individual ",
+                                                str(individual),
+                                                " in SNP ", fields[2],
+                                                " in file ", vcf_file,
+                                                " did not have a known genotype.\n",
+                                                "Reported genotype was: ", genotype])
                         _logme(error_string, logfile, 2)
                         raise Exception(error_string)
 
@@ -153,7 +160,8 @@ def parse_panel_file(panel_file, logfile=sys.stderr, verbose=False):
                 print_level = 2 if verbose else 0
                 _logme("Fields[0] is duplicated", logfile, print_level)
             else:
-                sample_info[fields[0]] = (fields[1], fields[2], [re.sub(',', '', platforms) for platforms in fields[3:]])
+                sample_info[fields[0]] = (fields[1], fields[2],
+                                          [re.sub(',', '', platforms) for platforms in fields[3:]])
 
     return(sample_info)
 
@@ -184,11 +192,11 @@ def filter(file_list, population_list, panel_file, output_directory='.', threads
 def _filter(vcf_file, population_list, sample_info, output_directory):
     """A private function to run the meat of the filtering
        Requires gzipped files like everything else"""
-     
+
     # Get an outfile name:
     outfile = re.sub('.vcf.gz$','', path.basename(vcf_file)) + '_' + '_'.join(population_list) + '.vcf.gz'
     outfile = path.realpath(output_directory) + '/' + outfile
-    
+
     with gzip.open(vcf_file, 'rb') as infile:
         # Check if this is 1000genomes or simplified
         header      = ''
@@ -203,7 +211,7 @@ def _filter(vcf_file, population_list, sample_info, output_directory):
                     simplified  = False
                     break
                 elif h.startswith('##'):
-                    continue  
+                    continue
                 else:
                     error_string = "File: " + vcf_file + " Appears to be an invalid 1000genomes file"
                     _logme(error_string, sys.stderr, 2)
@@ -259,7 +267,8 @@ def _filter(vcf_file, population_list, sample_info, output_directory):
 
                 # Print final output
                 output.write(''.join(['\t'.join(outstring), '\n']).encode('utf8'))
- 
+
+
 def _logme(output, logfile=sys.stderr, print_level=0):
     """Print a string to logfile
        From: https://raw2.github.com/MikeDacre/handy-functions/master/mike.py"""
@@ -299,14 +308,15 @@ def _logme(output, logfile=sys.stderr, print_level=0):
         print(output)
     elif print_level == 2 and not stderr:
         print(output, file=sys.stderr)
- 
+
+
 def _get_args():
     """Command Line Argument Parsing"""
     import argparse
 
     parser = argparse.ArgumentParser(
-                 description=__doc__,
-                 formatter_class=argparse.RawDescriptionHelpFormatter)
+                description=__doc__,
+                formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Required Files
     parser.add_argument('infiles', nargs='+',
@@ -322,13 +332,14 @@ def _get_args():
     parser.add_argument('-t', '--threads', nargs='?', default=default_threads,
                         help=''.join(["Threading, for running on multiple files. ",
                                       "Default: ", str(default_threads)]) )
-    parser.add_argument('-o', '--output_directory', 
+    parser.add_argument('-o', '--output_directory',
                         help="Directory to place output files. Default is current working directory")
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
     parser.add_argument('-l', '--logfile',
                         help="Optional log file for verbose output, Default STDERR (append mode)")
 
     return parser
+
 
 # Main function for direct running
 def main():
