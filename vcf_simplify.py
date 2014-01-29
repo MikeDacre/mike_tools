@@ -14,7 +14,7 @@
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-28 23:03
+ Last modified: 2014-01-28 23:47
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -50,7 +50,7 @@ USAGE EXAMPLES: Simply vcf files:
 =============================================================================================
 """
 import gzip, sys, re
-from os import path
+from os import path, makedirs
 from multiprocessing import Pool
 
 # Default threads
@@ -355,6 +355,8 @@ def main():
 
     # Choose output Directory
     if args.output_directory:
+        if not path.isdir(output_directory):
+            makedirs(output_directory)
         output_directory = path.realpath(args.output_directory)
     else:
         output_directory = path.realpath('.')
