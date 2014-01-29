@@ -14,7 +14,7 @@
        LICENSE: MIT License, Property of Stanford, Use however you wish
        VERSION: 0.3
        CREATED: 2014-01-21 17:38
- Last modified: 2014-01-28 23:47
+ Last modified: 2014-01-28 23:51
 
    DESCRIPTION: Take a compressed vcf file such as
                 ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase1/analysis_results/integrated_call_sets/ALL.chr1.integrated_phase1_v3.20101123.snps_indels_svs.genotypes.vcf.gz
@@ -56,15 +56,15 @@ from multiprocessing import Pool
 # Default threads
 default_threads = 8
 
+
 def vcf_simplify(vcf_file, output_directory='.', logfile=sys.stderr, verbose=False):
     """Take a 1000genomes style vcf file (MUST BE GZIPPED) and
        simplify it to:
 
        chr\\tpos\\trsID\\tref\\talt\\tqual\\tfilter\\tsample_1\\t[sample_2]\\t...[sample_n]\\n"""
 
-
     # Get an outfile name:
-    outfile = re.sub('.vcf.gz$','', path.basename(vcf_file)) + '_simplified.vcf.gz'
+    outfile = re.sub('.vcf.gz$', '', path.basename(vcf_file)) + '_simplified.vcf.gz'
     outfile = path.realpath(output_directory) + '/' + outfile
 
     with gzip.open(vcf_file, 'rb') as infile:
@@ -137,6 +137,7 @@ def vcf_simplify(vcf_file, output_directory='.', logfile=sys.stderr, verbose=Fal
                 # Print line
                 output.write(''.join(['\t'.join(outstring), '\n']).encode('utf8'))
 
+
 def parse_panel_file(panel_file, logfile=sys.stderr, verbose=False):
     """Take 1000genomes-style panel file and return a dictionary
        with SampleID->(population, region, [platforms])
@@ -165,6 +166,7 @@ def parse_panel_file(panel_file, logfile=sys.stderr, verbose=False):
 
     return(sample_info)
 
+
 def filter(file_list, population_list, panel_file, output_directory='.', threads=default_threads, verbose=False, logfile=sys.stderr):
     """Filter provided vcf files based on population.
        Works on either original or simplified vcf files
@@ -189,12 +191,13 @@ def filter(file_list, population_list, panel_file, output_directory='.', threads
     for process in running_processes:
         process.get()
 
+
 def _filter(vcf_file, population_list, sample_info, output_directory):
     """A private function to run the meat of the filtering
        Requires gzipped files like everything else"""
 
     # Get an outfile name:
-    outfile = re.sub('.vcf.gz$','', path.basename(vcf_file)) + '_' + '_'.join(population_list) + '.vcf.gz'
+    outfile = re.sub('.vcf.gz$', '', path.basename(vcf_file)) + '_' + '_'.join(population_list) + '.vcf.gz'
     outfile = path.realpath(output_directory) + '/' + outfile
 
     with gzip.open(vcf_file, 'rb') as infile:
@@ -331,7 +334,7 @@ def _get_args():
                         help="Filter based on population. Uses panel_file. Provide comma-separated list of populations")
     parser.add_argument('-t', '--threads', nargs='?', default=default_threads,
                         help=''.join(["Threading, for running on multiple files. ",
-                                      "Default: ", str(default_threads)]) )
+                                      "Default: ", str(default_threads)]))
     parser.add_argument('-o', '--output_directory',
                         help="Directory to place output files. Default is current working directory")
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
@@ -355,8 +358,8 @@ def main():
 
     # Choose output Directory
     if args.output_directory:
-        if not path.isdir(output_directory):
-            makedirs(output_directory)
+        if not path.isdir(args.output_directory):
+            makedirs(args.output_directory)
         output_directory = path.realpath(args.output_directory)
     else:
         output_directory = path.realpath('.')
@@ -384,7 +387,7 @@ def main():
 
         # Queue up the vcf_simplify instances
         for vcf_file in args.infiles:
-            running_processes.append(pool.apply_async(vcf_simplify, (vcf_file, output_directory, args.logfile, args.verbose)) )
+            running_processes.append(pool.apply_async(vcf_simplify, (vcf_file, output_directory, args.logfile, args.verbose)))
 
         # Run threads
         for process in running_processes:
