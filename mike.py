@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8 tabstop=4 expandtab shiftwidth=4 softtabstop=4
 """
@@ -10,11 +10,11 @@
 #       LICENSE: Open Source - Public - Do as you wish (no license) - Mike Dacre
 #       VERSION: 0.1
 #       CREATED: 2013-08-26 10:39
-# Last modified: 2013-09-04 16:37
+# Last modified: 2014-01-30 17:36
 #
 #   DESCRIPTION: General functions that I use in my scripts
 #
-#         USAGE: Run as a script or import as a module.  See '-h' or 'help' for usage
+#         USAGE: For importing.
 #
 #====================================================================================
 """
@@ -57,10 +57,10 @@ def logme(output, logfile='', print_level=0):
             with open(logfile, 'a') as outfile:
                 print(timeput, file=outfile)
         elif getattr(logfile, 'name') == '<stderr>':
-            print(timeput, file=logfile)    
+            print(timeput, file=logfile)
             stderr = True
         elif getattr(logfile, 'name') == '<stdout>':
-            print(timeput, file=logfile)    
+            print(timeput, file=logfile)
             stdout = True
         elif getattr(logfile, 'mode') == 'a':
             if getattr(logfile, 'closed'):
@@ -85,13 +85,13 @@ def pbs_submit(command, name='', template=''):
     """Take a command and an optional template and submit it to PBS. Return job number"""
 
     if not template:
-        template = """#!/bin/bash 
+        template = """#!/bin/bash
 #PBS -S /bin/bash
 #PBS -m ae
 """
     if not name:
         name = command
-    
+
     template = '\n'.join([template, ' '.join(["#PBS -N", name]), "cd $PBS_O_WORKDIR", ''])
 
     # Open pbs session
@@ -104,12 +104,12 @@ def pbs_submit(command, name='', template=''):
     # Get job number
     output = pbs_command.stdout.read().decode().rstrip()
     pbs_command.stdout.close()
- 
+
     return output
- 
+
 def qstat_mon(job_list, verbose=False, logfile=sys.stderr):
     """ Take a list of job numbers and monitor them for completion.
-        List can be either a plain list of a dictionary with 
+        List can be either a plain list of a dictionary with
         { name : job_number } format, where name is any name you
         wish
         Returns a tuple with success/failure and dictionary of exit codes
@@ -171,3 +171,7 @@ def qstat_mon(job_list, verbose=False, logfile=sys.stderr):
 
     # Return dictionary of completed jobs
     return success, complete_jobs
+
+# If executed directly, inform the user that they are a fool.
+
+print("This script is a function bucket you foolish person!")
