@@ -1,11 +1,8 @@
-Mike's Handy Functions
-===============
+Mike's Random Scripts
+=====================
 
-My little python functions that I use often enough to warrant their own file(s).
+A selection of little unrelated tools that I have written for working with the fraser server.  Use as you wish.
 
-Feel free to use and abuse these however you wish.
-
-A lot of my scripts use these functions, so if you are confused by why my code isn't working,
-you probably need this directory.
-
--Mike 2013-08-26
+mike.py
+-------
+A bucket of functions that I use in my other scripts, not important enough to get their own files.
