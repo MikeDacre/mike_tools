@@ -172,6 +172,6 @@ def qstat_mon(job_list, verbose=False, logfile=sys.stderr):
     # Return dictionary of completed jobs
     return success, complete_jobs
 
-# If executed directly, inform the user that they are a fool.
-
-print("This script is a function bucket you foolish person!")
+# If executed directly, inform the user that they are a little silly.
+if __name__ == '__main__':
+    print("This script is a function bucket, don't run as a script")
