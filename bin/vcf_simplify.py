@@ -111,6 +111,8 @@ def vcf_simplify(vcf_file, output_directory='.', logfile=sys.stderr, verbose=Fal
                 # Get initial columns
                 outstring = fields[0:7]
 
+                # Figure out genotype.
+                # ToDo: Add function to detect character format genotypes
                 # Parse individuals
                 for individual in range(9, len(fields)):
                     genotype = fields[individual].split(':')[0]
