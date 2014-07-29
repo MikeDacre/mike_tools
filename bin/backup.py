@@ -4,7 +4,7 @@
 #
 # Copyright © Mike Dacre <mike.dacre@gmail.com>
 #
-# Distributed under terms of the MIT license 
+# Distributed under terms of the MIT license
 """\
 ===============================================================================
 
@@ -17,24 +17,19 @@
              CREATED: 2013-02-27 03:09:08 PM
             MODIFIED: 2013-04-30 14:59:19
 
-               USAGE: ./selective-backup.py [-o] [-l] [-r] file1 [file2]...[folder1...
+               USAGE: ./selective-backup.py [-l] [-r] file1 [file2]...[folder1...
 
          DESCRIPTION: Create a hard link tree for use with backup software.
-                      Currently designed to work with CrashPlanPro and rsync.
+                      Currently designed to work with CrashPlanPro
                       Number of allowed locations is specified in allowed_locations
                       variable; this prevents running from non-standard locations.
 
                       The script can create and delete backups, as well as list all
                       user backups in a given location.
 
-                      Backup location is set using the '-o' flag.  This script uses
-                      farm, crash, and local.  The only difference from the perspective
-                      of this script is hard link tree location. Actual backups are done
-                      using other methods.
-
                 NOTE: Does NOT actually do ANY BACKUPS. Simply facilitates backups
 
-             VERSION: 0.1
+             VERSION: 0.2
         REQUIREMENTS: python3
 ===============================================================================
 
@@ -53,19 +48,19 @@ import os, re, sys, subprocess, argparse
 allowed_locations = ['home', 'science']
 
 # Backup paths.  This will be created in the root directory of the allowed location
-regular_backup_path = 'backup'
+regular_backup_path = 'backup-offsite'
 offsite_backup_path = 'backup-offsite'
 
 def _get_args():
     """Command Line Argument Parsing"""
     import argparse, sys
-     
+
     helpstring = '\n'.join([__doc__,
-                 "This script works only in either the", 
+                 "This script works only in either the",
                  ' or '.join(allowed_locations), "\ndirectories.\n"
     All other files are already robustly backed up.
 
- 
+
     parser = argparse.ArgumentParser(
                  description=__doc__,
                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -74,8 +69,8 @@ def _get_args():
     parser.add_argument('file', type=str, nargs='*', help="Files or Folders to back up")
 
     # Location selection
-    parser.add_argument('-d', dest='destination', 
-            help="Use offsite backup location (crashplan)")
+    #parser.add_argument('-d', dest='destination',
+            #help="Use offsite backup location (crashplan)")
 
     # Other options
     parser.add_argument('-l', dest='listfiles', action='store_true',
@@ -85,11 +80,6 @@ def _get_args():
 
     # Optional Arguments
     parser.add_argument('-v', help="Verbose output")
-
-    # Optional Files
-    parser.add_argument('-l', '--logfile', nargs='?', default=sys.stderr,
-                        type=argparse.FileType('a'),
-                        help="Log File, Default STDERR (append mode)")
 
     args = parser.parse_args()
     return parser
@@ -161,10 +151,11 @@ def main():
                 continue
 
             ## Set backup location
-            if args.offsite:
-                backup_path = offsite_backup_path
-            else:
-                backup_path = regular_backup_path
+            #if args.offsite:
+                #backup_path = offsite_backup_path
+            #else:
+                #backup_path = regular_backup_path
+            backup_path = offsite_backup_path
 
             backuplocation = '/'.join(['', rootdir, backup_path, filesubpath])
             backupdestination = '/'.join([backuplocation, filename])
@@ -221,10 +212,13 @@ def main():
                 continue
 
             ## Set backup location
-            if args.offsite:
-                backup_path = offsite_backup_path
-            else:
-                backup_path = regular_backup_path
+            #if args.offsite:
+                #backup_path = offsite_backup_path
+            #else:
+                #backup_path = regular_backup_path
+
+            ## Only offsite now
+            backup_path = offsite_backup_path
 
             backuplocation = '/'.join(['', rootdir, backup_path, filesubpath])
             backupdestination = '/'.join([backuplocation, filename])
