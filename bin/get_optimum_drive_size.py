@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8 tabstop=4 expandtab shiftwidth=4 softtabstop=4
 #
-# Copyright © Mike Dacre <mike.dacre@gmail.com>
-#
 # Distributed under terms of the MIT license
 """
 Provide the script with a block device id (e.g. sda or sdc) and it
