@@ -30,7 +30,7 @@ find_parse = re.compile(r'/^\./\/home/')
 allowed_locations = ['home', 'science']
 
 # Backup paths.  This will be created in the root directory of the allowed location
-regular_backup_path = 'backup'
+#regular_backup_path = 'backup-offsite'
 offsite_backup_path = 'backup-offsite'
 
 
@@ -76,11 +76,11 @@ if args.listfiles:
     for location in allowed_locations:
         print(' '.join(["\n", location, "directory\n"]))
 
-        print("Locally backed up files:")
-        os.chdir('/'.join(['', location, regular_backup_path]))
-        filelist = subprocess.check_output(['find', '.', '-user', username]).decode('utf-8').split('\n')
-        for listfile in filelist:
-            print( re.sub(r'^\.', ''.join([r'/', location]), listfile) )
+        #print("Locally backed up files:")
+        #os.chdir('/'.join(['', location, regular_backup_path]))
+        #filelist = subprocess.check_output(['find', '.', '-user', username]).decode('utf-8').split('\n')
+        #for listfile in filelist:
+            #print( re.sub(r'^\.', ''.join([r'/', location]), listfile) )
 
         print("\nOffsite backed up files:")
         os.chdir('/'.join(['', location, offsite_backup_path]))
