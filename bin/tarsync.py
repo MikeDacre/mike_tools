@@ -14,7 +14,7 @@
 #       LICENSE: MIT License, Property of Stanford, Use as you wish
 #       VERSION: 1.0 (beta)
 #       CREATED: 2014-08-13 12:34
-# Last modified: 2014-08-13 16:25
+# Last modified: 2014-08-13 16:30
 #
 #   DESCRIPTION: rsync is fantastic for incremental backups, but it is really
 #                slow for initial transfers where large amounts of data have to
@@ -82,6 +82,10 @@ def tarsync(start, end, verbose=False):
             i = sub(start + '/', '', i)
             if not i:
                 continue
+
+            if verbose:
+                print(_c('cyan', "Copying " + i), file=stderr)
+
             if i.endswith('/'):
                 if not path.exists(end + '/' + i):
                     makedirs(end + '/' + i)
