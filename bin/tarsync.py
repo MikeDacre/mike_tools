@@ -14,7 +14,7 @@
 #       LICENSE: MIT License, Property of Stanford, Use as you wish
 #       VERSION: 1.0 (beta)
 #       CREATED: 2014-08-13 12:34
-# Last modified: 2014-08-13 16:30
+# Last modified: 2014-08-14 12:13
 #
 #   DESCRIPTION: rsync is fantastic for incremental backups, but it is really
 #                slow for initial transfers where large amounts of data have to
@@ -30,6 +30,7 @@
 #
 #====================================================================================
 """
+debug=True
 
 def tarsync(start, end, verbose=False):
     """ Use rsync comparison to tar copy files """
@@ -53,9 +54,29 @@ def tarsync(start, end, verbose=False):
     rstart   = start + '/'
     rend     = end + '/'
 
-    j = check_output(['rsync', '--verbose', '--recursive', '--dry-run', rstart, rend]).decode('utf8').rstrip().split('\n')[1:-3]
+    if verbose:
+        print(_c('cyan', "Building file list from rsync"), file=stderr)
+
+    try:
+        j = check_output(['rsync', '--verbose', '--recursive', '--dry-run', rstart, rend]).decode('utf8').rstrip().split('\n')[1:-3]
+    except CalledProcessError:
+        print(_c('red', "\n\nRsync process died!!\n\n", bold=True), file=stderr)
+        print(str(returncode))
+        print(str(cmd))
+        if output:
+            print(str(output))
+        exit(21)
+
+    if debug:
+        print(j)
+
     j = [i for i in filter(None, j)]
+    if debug:
+        print(j)
+
     l = len(j)
+    if debug:
+        print(str(l))
 
     if l == 0:
         print(_c('green', "Folders are the same", bold=True), file=stderr)
@@ -83,21 +104,45 @@ def tarsync(start, end, verbose=False):
             if not i:
                 continue
 
-            if verbose:
-                print(_c('cyan', "Copying " + i), file=stderr)
-
             if i.endswith('/'):
+                if verbose:
+                    print(_c('cyan', "Making directory " + i), file=stderr)
                 if not path.exists(end + '/' + i):
                     makedirs(end + '/' + i)
             else:
+                if verbose:
+                    print(_c('cyan', "Copying " + i), file=stderr)
                 chdir(start)
+                if debug:
+                    print("Change to start directory")
+                    print(str(path.abspath(path.curdir)))
+
                 tar_send = Popen(['tar', 'cf', '-', i], stdout = PIPE)
+
                 chdir(end)
-                Popen(['tar', 'xf', '-'], stdin = tar_send.stdout)
+                if debug:
+                    print("Change to end directory")
+                    print(str(path.abspath(path.curdir)))
+
+                tar_get = Popen(['tar', 'xf', '-'], stdin = tar_send.stdout)
+
+                outs, errs = tar_get.communicate()
+
+                if tar_get.returncode:
+                    print(_c('red', "\nCommand failed\n", bold=True), file=stderr)
+
+                if debug:
+                    print("Command exited with code: " + str(tar_get.returncode))
+                    if outs:
+                        print("Command execution output:")
+                        print(str(outs))
+                    if errs:
+                        print("Command execution error messages:")
+                        print(str(errs))
                 chdir(initial_dir)
 
     # Final rsync confirmation
-    commands = ['rsync', '--verbose', '--recursive', rstart, rend]
+    commands = ['rsync', '--verbose', '--recursive', '--progress', '--stats', rstart, rend]
     if verbose:
         print("\n" + _c('green', "Running final rsync check:"), file=stderr)
         call(commands)
