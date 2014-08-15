@@ -14,7 +14,7 @@
 #       LICENSE: MIT License, Property of Stanford, Use as you wish
 #       VERSION: 1.0 (beta)
 #       CREATED: 2014-08-13 12:34
-# Last modified: 2014-08-14 12:13
+# Last modified: 2014-08-14 17:27
 #
 #   DESCRIPTION: rsync is fantastic for incremental backups, but it is really
 #                slow for initial transfers where large amounts of data have to
@@ -30,7 +30,7 @@
 #
 #====================================================================================
 """
-debug=True
+debug=False
 
 def tarsync(start, end, verbose=False):
     """ Use rsync comparison to tar copy files """
