@@ -14,7 +14,7 @@
 #       LICENSE: MIT License, Property of Stanford, Use as you wish                     #
 #       VERSION: 0.1                                                                    #
 #       CREATED: 2014-08-22 16:26                                                       #
-# Last modified: 2014-08-22 16:56
+# Last modified: 2014-08-25 11:48
 #                                                                                       #
 #   DESCRIPTION: Create a bunch of temporary matlab scripts to call some other          #
 #                matlab script and then submit to the cluster.                          #
@@ -55,8 +55,8 @@ def _get_args():
     # Optional Arguments
     parser.add_argument('-p', '--path', nargs='?',
                         help="Comma or space separated list of matlab paths")
-    parser.add_argument('-V', '--variables', nargs='?',
-                        help="Space separated list variables to pass to function")
+    parser.add_argument('-p', '--variables', nargs='?',
+                        help="Space separated list variables to pass to function. Or use STDIN")
     parser.add_argument('-v', dest='verbose', help="Verbose output")
 
     # Function name
