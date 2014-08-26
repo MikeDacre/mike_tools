@@ -14,7 +14,7 @@
 #       LICENSE: MIT License, Property of Stanford, Use as you wish                    #
 #       VERSION: 2.0 (beta)                                                            #
 #       CREATED: 2014-08-13 12:34                                                      #
-# Last modified: 2014-08-26 11:34
+# Last modified: 2014-08-26 11:38
 #                                                                                      #
 #   DESCRIPTION: rsync is fantastic for incremental backups, but it is really          #
 #                slow for initial transfers where large amounts of data have to        #
