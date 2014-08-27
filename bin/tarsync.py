@@ -6,69 +6,38 @@
 #
 # Distributed under terms of the MIT license
 """
-#======================================================================================#
-#                                                                                      #
-#          FILE: tarsync (python 3)                                                    #
-#        AUTHOR: Michael D Dacre, mike.dacre@gmail.com                                 #
-#  ORGANIZATION: Stanford University                                                   #
-#       LICENSE: MIT License, Property of Stanford, Use as you wish                    #
-#       VERSION: 2.0 (beta)                                                            #
-#       CREATED: 2014-08-13 12:34                                                      #
-# Last modified: 2014-08-26 11:38
-#                                                                                      #
-#   DESCRIPTION: rsync is fantastic for incremental backups, but it is really          #
-#                slow for initial transfers where large amounts of data have to        #
-#                be copied. tar on the other hand can easily reach 100% IO             #
-#                usage on an external USB3 drive - much, much faster - but yet         #
-#                it has no ability to detect incremental changes                       #
-#                                                                                      #
-#                tarsync addresses this issue, by using rsync to build a list          #
-#                of files that need to be transfered, and then using tar to do         #
-#                the actual transfer.                                                  #
-#                                                                                      #
-#         USAGE: Run as a script or import as a module.  See '-h' or 'help' for usage  #
-#                                                                                      #
-#======================================================================================#
+#====================================================================================
+#
+#          FILE: tarsync (python 3)
+#        AUTHOR: Michael D Dacre, mike.dacre@gmail.com
+#  ORGANIZATION: Stanford University
+#       LICENSE: MIT License, Property of Stanford, Use as you wish
+#       VERSION: 1.0 (beta)
+#       CREATED: 2014-08-13 12:34
+# Last modified: 2014-08-14 17:27
+#
+#   DESCRIPTION: rsync is fantastic for incremental backups, but it is really
+#                slow for initial transfers where large amounts of data have to
+#                be copied. tar on the other hand can easily reach 100% IO
+#                usage on an external USB3 drive - much, much faster - but yet
+#                it has no ability to detect incremental changes
+#
+#                tarsync addresses this issue, by using rsync to build a list
+#                of files that need to be transfered, and then using tar to do
+#                the actual transfer.
+#
+#         USAGE: Run as a script or import as a module.  See '-h' or 'help' for usage
+#
+#====================================================================================
 """
-from sys import stderr, exit
 debug=False
 
-def tar_copy(start, end, file, verbose=False):
-    """ Actually do the tar copy on a list of files """
-    from subprocess import Popen, PIPE
-    from os import path, system
-
-    start_file  = '/' + start + '/' + file
-    if debug:
-        print(start_file)
-
-    if verbose:
-        print(_c('cyan', "Copying " + file), file=stderr)
-
-    tar_send_expression = ['tar', 'cf', '-', start_file]
-    if debug:
-        tar_send_expression.append('--verbose')
-        print(' '.join(tar_send_expression))
-
-    tar_get_expression = ['tar', 'xf', '-', '-C', end, "--transform='s#" + start + "##'"]
-    if debug:
-        tar_get_expression.append('--verbose')
-        print(' '.join(tar_get_expression))
-
-    err = system(' '.join(tar_send_expression) + ' 2>/dev/null | ' + ' '.join(tar_get_expression) + ' 2>/dev/null')
-
-    if err:
-        print(_c('red', "\nCommand failed\n", bold=True), file=stderr)
-        return(1)
-    else:
-        return(0)
-
-def tarsync(start, end, cores=1, verbose=False):
+def tarsync(start, end, verbose=False):
     """ Use rsync comparison to tar copy files """
     from subprocess import call, check_output, Popen, PIPE
-    from multiprocessing import Pool
     from os import path, chdir, makedirs
     from re import sub
+    from sys import stderr, exit
 
     # Error checking
     if not path.exists(start):
@@ -130,7 +99,6 @@ def tarsync(start, end, cores=1, verbose=False):
         chdir(initial_dir)
 
     else:
-        p = Pool(cores)
         for i in j:
             i = sub(start + '/', '', i)
             if not i:
@@ -142,13 +110,36 @@ def tarsync(start, end, cores=1, verbose=False):
                 if not path.exists(end + '/' + i):
                     makedirs(end + '/' + i)
             else:
+                if verbose:
+                    print(_c('cyan', "Copying " + i), file=stderr)
+                chdir(start)
                 if debug:
-                    print(start)
-                #tar_copy(sub(r'^/', '', start), end, i, verbose)
-                p.apply_async(tar_copy, [sub(r'^/', '', start), end, i, verbose])
+                    print("Change to start directory")
+                    print(str(path.abspath(path.curdir)))
 
-        p.close()
-        p.join()
+                tar_send = Popen(['tar', 'cf', '-', i], stdout = PIPE)
+
+                chdir(end)
+                if debug:
+                    print("Change to end directory")
+                    print(str(path.abspath(path.curdir)))
+
+                tar_get = Popen(['tar', 'xf', '-'], stdin = tar_send.stdout)
+
+                outs, errs = tar_get.communicate()
+
+                if tar_get.returncode:
+                    print(_c('red', "\nCommand failed\n", bold=True), file=stderr)
+
+                if debug:
+                    print("Command exited with code: " + str(tar_get.returncode))
+                    if outs:
+                        print("Command execution output:")
+                        print(str(outs))
+                    if errs:
+                        print("Command execution error messages:")
+                        print(str(errs))
+                chdir(initial_dir)
 
     # Final rsync confirmation
     commands = ['rsync', '--verbose', '--recursive', '--progress', '--stats', rstart, rend]
@@ -191,8 +182,6 @@ def _get_args():
                  formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Optional Arguments
-    parser.add_argument('-p', dest='cores', default=1, type=int,
-                        help="Number of parallel cores to use when copying. Don't use more than 4 at a time.")
     parser.add_argument('-v', action='store_true', dest='verbose',
                         help="Verbose output")
 
@@ -211,7 +200,7 @@ def main():
     parser = _get_args()
     args = parser.parse_args()
 
-    tarsync(start=args.copy_from, end=args.copy_to, cores=args.cores, verbose=args.verbose)
+    tarsync(args.copy_from, args.copy_to, args.verbose)
 
 # The end
 if __name__ == '__main__':
