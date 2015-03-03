@@ -14,7 +14,13 @@
 #       LICENSE: MIT License, Property of Stanford, Use as you wish                     #
 #       VERSION: 0.1                                                                    #
 #       CREATED: 2014-08-22 16:26                                                       #
-# Last modified: 2015-03-03 11:38
+<<<<<<< HEAD
+# Last modified: 2014-08-25 15:50
+||||||| merged common ancestors
+# Last modified: 2014-08-22 16:56
+=======
+# Last modified: 2014-08-25 11:48
+>>>>>>> 7333d5ab7708810c15621f167df6f85e88fa68d0
 #                                                                                       #
 #   DESCRIPTION: Create a bunch of temporary matlab scripts to call some other          #
 #                matlab script and then submit to the cluster.                          #
@@ -103,6 +109,7 @@ def _get_args():
                  formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Optional Arguments
+<<<<<<< HEAD
     parser.add_argument('-p', '--path',
                         help="Comma separated list of matlab paths")
     parser.add_argument('--cores',
@@ -114,6 +121,19 @@ def _get_args():
     parser.add_argument('-t', '--tmp_path',
                         help="Where to store tempfiles, defaults to current working dir")
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
+||||||| merged common ancestors
+    parser.add_argument('-p', '--path', nargs='?',
+                        help="Comma or space separated list of matlab paths")
+    parser.add_argument('-V', '--variables', nargs='?',
+                        help="Space separated list variables to pass to function")
+    parser.add_argument('-v', dest='verbose', help="Verbose output")
+=======
+    parser.add_argument('-p', '--path', nargs='?',
+                        help="Comma or space separated list of matlab paths")
+    parser.add_argument('-p', '--variables', nargs='?',
+                        help="Space separated list variables to pass to function. Or use STDIN")
+    parser.add_argument('-v', dest='verbose', help="Verbose output")
+>>>>>>> 7333d5ab7708810c15621f167df6f85e88fa68d0
 
     # Function name
     parser.add_argument('function',
