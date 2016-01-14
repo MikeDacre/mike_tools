@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+============================================================================
+
+        AUTHOR: Michael D Dacre, mike.dacre@gmail.com
+  ORGANIZATION: Stanford University
+       LICENSE: MIT License, property of Stanford, use as you wish
+       CREATED: 2016-15-07 15:01
+ Last modified: 2016-01-13 17:50
+
+   DESCRIPTION: Convert a scarf file to a fastq
+
+============================================================================
+"""
+import sys
+import argparse
+
+###############################################################################
+#                                Core Function                                #
+###############################################################################
+
+
+def scarf_to_fastq(infile=sys.stdin, outfile=sys.stdout):
+    """ Convert a scarf file to a fastq """
+    infile  = open_gzipped(infile)
+    outfile = open_gzipped(outfile, 'wt')
+    for line in infile:
+        fields = line.rstrip().split(':')
+        qual = fields.pop()
+        seq  = fields.pop()
+        outfile.write('{0}\n{1}\n+\n{2}\n'.format(
+            '@' + ':'.join(fields),
+            seq,
+            qual))
+
+
+###############################################################################
+#                              Private Functions                              #
+###############################################################################
+
+
+def open_gzipped(infile, mode='rt'):
+    """ Return file handle of file regardless of gzipped or not """
+    import gzip
+    import bz2
+    if  mode.startswith('r'):
+        tmode = 'rt'
+        bmode = 'r'
+    elif  mode.startswith('w'):
+        tmode = 'wt'
+        bmode = 'w'
+    elif  mode.startswith('a'):
+        tmode = 'at'
+        bmode = 'a'
+    if hasattr(infile, 'write'):
+        return infile
+    if isinstance(infile, str):
+        if infile.endswith('.gz'):
+            return gzip.open(infile, tmode)
+        if infile.endswith('.bz2'):
+            if hasattr(bz2, 'open'):
+                return bz2.open(infile, tmode)
+            else:
+                return bz2.BZ2File(infile, bmode)
+        return open(infile, tmode)
+
+###############################################################################
+#                            Interactive Running                              #
+###############################################################################
+
+
+def main(argv=None):
+    """ Run as a script """
+    if not argv:
+        argv = sys.argv[1:]
+
+    f_class = argparse.RawDescriptionHelpFormatter
+    parser  = argparse.ArgumentParser(description=__doc__,
+                                      formatter_class=f_class)
+
+    # Optional positional files
+    parser.add_argument('-i', '--scarf_file', default=sys.stdin,
+                        help="Scarf file (Default: STDIN)")
+    parser.add_argument('-o', '--outfile', default=sys.stdout,
+                        help="Fastq file to write to (Default: STDOUT)")
+
+    args = parser.parse_args()
+
+    # Actually run the script
+    scarf_to_fastq(infile=args.scarf_file, outfile=args.outfile)
+
+if __name__ == '__main__' and '__file__' in globals():
+    sys.exit(main())
