@@ -10,7 +10,7 @@ https://github.com/brentp/bio-playground/blob/master/plots/manhattan-plot.py
        VERSION: 1.0
 
        CREATED: 2016-30-13 12:01
- Last modified: 2016-01-13 16:34
+ Last modified: 2016-01-13 17:13
 
    DESCRIPTION: Create a manhattan plot from a dictionary of
                 chr->(position, p-value)
@@ -41,7 +41,7 @@ def plot(chrdict, sig_line=0.001, title=None, image_path=None,
                  the significance point defined by sig_line, which is then
                  corrected for multiple hypothesis testing.
 
-        Returns: A matplotlib.pyplot object
+        Returns: A matplotlib.pyplot.figure() object
 
         Options:
 
@@ -140,7 +140,7 @@ def plot(chrdict, sig_line=0.001, title=None, image_path=None,
     # Save if requested
     if image_path:
         plt.savefig(image_path)
-    return plt
+    return f
 
 ###############################################################################
 #                              Private Functions                              #
