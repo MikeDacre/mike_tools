@@ -9,6 +9,8 @@ Plot a dictionary of points + p-values as a manhattan plot, e.g.:
   import manhattan_plot
   manhattan_plot.plot(dict, sig_line=0.05, title='GWAS')
 
+Many thanks to [Brent Pedersen](https://github.com/brentp) for the [original script](https://github.com/brentp/bio-playground/blob/master/plots/manhattan-plot.py). This version is just a modification of that code to allow running as a module and easy python2/3 functionality.
+
 An example output is here: [Manhattan_Plot](https://nbviewer.jupyter.org/github/MikeDacre/mike_tools/blob/master/python/Manhattan_Plot.ipynb)
 
 Usage: `plot(chrdict, sig_line=0.001, title=None, image_path=None, colors='bgrcmyk', log_scale=True, line_graph=False)`
