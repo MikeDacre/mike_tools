@@ -1,18 +1,6 @@
 Mike's Random Scripts
 =====================
 
-A selection of little unrelated tools that I have written for working with the fraser server.  Use as you wish.
+A selection of little unrelated tools that do not merit their own repos.  Use as you wish.
 
-mike.py
--------
-A bucket of functions that I use in my other scripts, not important enough to get their own files.
-Fraser Tools
-============
-
-Little scripts for use on fraser-server.stanford.edu
-
-backup.py
----------
-
-Create and manage directory link trees in order to facilitate backups.
-Currently designed to work with rsync jobs, and with CrashPlanPro.
+The tools in python/ are intended to be placed in python's runtime path for use by import. The tools in bin/ are intended to be run directly.
