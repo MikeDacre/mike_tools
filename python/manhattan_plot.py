@@ -10,7 +10,7 @@ https://github.com/brentp/bio-playground/blob/master/plots/manhattan-plot.py
        VERSION: 1.0
 
        CREATED: 2016-30-13 12:01
- Last modified: 2016-01-13 16:01
+ Last modified: 2016-01-13 16:34
 
    DESCRIPTION: Create a manhattan plot from a dictionary of
                 chr->(position, p-value)
@@ -62,7 +62,7 @@ def plot(chrdict, sig_line=0.001, title=None, image_path=None,
                         w: white
 
     If log_scale is True, -log10 is used for p-value scaling otherwise
-    raw p-values will be used.
+    raw p-values will be used, there is no good reason not to use -log10.
 
     If line_graph is True, the data will be plotted as lines instead of
     a scatter plot (not recommended).
@@ -105,7 +105,7 @@ def plot(chrdict, sig_line=0.001, title=None, image_path=None,
 
     plt.close()  # Make sure we don't overlap the plots
     f = plt.figure()
-    ax = f.add_axes((0.1, 0.09, 0.88, 0.85))  # TODO: No idea what this does
+    ax = f.add_axes((0.1, 0.09, 0.88, 0.85))  # Define axes boundaries
 
     # Set a title
     if title:
