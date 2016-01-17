@@ -33,13 +33,10 @@ def create_pipeline():
 
 def add_to_pipeline(pip):
     """Add some steps to the pipeline"""
-    lg('Testing additions... adding commands')
     pip.add('ls')
     pip.add('ls', '~', name='bob')
     pip.add_function(write_something, 'call1')
     pip.add(write_something, args=('call2',), name='run2')
-    lg('Current pipeline:\n' + str(pip))
-    lg('Testing additions... saving')
     assert len(pip) == 4
     pip.save()
 
@@ -57,14 +54,12 @@ def remove_pipeline():
 
 def test_pipeline_creation():
     """Create a Pipeline object and add a few steps."""
-    lg('Testing creation')
     remove_pipeline()
     create_pipeline()
 
 
 def test_additions():
     """Add methods to pipeline."""
-    lg('Testing additions... restoring pipeline')
     add_to_pipeline(get_pipeline())
 
 
@@ -84,16 +79,13 @@ def test_restore():
 
 def test_run():
     """Execute pipeline steps."""
-    lg('Testing run_all')
     get_pipeline().run_all()
     lg(str(get_pipeline()))
 
 
 def test_output():
     """Print the outputs from the commands"""
-    lg('Testing outputs')
     pip = get_pipeline()
-    lg(str(pip))
     assert pip['write_something'].out == 'call1\n'
     for step in pip:
         assert step.out is not None
