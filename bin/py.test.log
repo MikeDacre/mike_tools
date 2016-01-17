@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+"""Print a log after running pytest."""
+
+# -*- coding: utf-8 -*-
+import re
+import os
+import sys
+import argparse
+
+from pytest import main
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--logtoprint')
+    parser.add_argument('--deletelog', action='store_true')
+    parser.add_argument('-h', '--help', action='store_true')
+    script = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    args, remaining = parser.parse_known_args()
+    if args.help:
+        sys.stdout.write(__doc__ + "\nOptions:\n--logtoprint Filename of log" +
+                         "\n--deletelog Delete log on exit\n\npy.test help:\n")
+        sys.argv = [script, '--help']
+    else:
+        sys.argv = [script] + remaining
+    code = main()
+    if args.logtoprint and not args.help:
+        os.system('cat ' + args.logtoprint)
+        if args.deletelog:
+            os.remove(args.logtoprint)
+    sys.exit(code)
