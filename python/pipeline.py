@@ -8,7 +8,7 @@ Easily manage a complex pipeline with python.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 1.0
        CREATED: 2016-14-15 16:01
- Last modified: 2016-01-16 15:56
+ Last modified: 2016-01-16 16:11
 
    DESCRIPTION: Classes and functions to make running a pipeline easy
 
@@ -249,8 +249,9 @@ class Pipeline(object):
         """Failed pipeline steps."""
 
         def __init__(self, message):
-            super(Pipeline.PipelineError, self).__init__()
+            """Log message as well as raising."""
             log(message, kind='critical')
+            super(Pipeline.PipelineError, self).__init__()
 
 
 ###############################################################################
@@ -362,10 +363,7 @@ class Command(Step):
         super(Command, self).__init__(command, args)
 
         # Make sure command exists
-        self.command = chk('which {}'.format(command))[1]
-        if self.command == '{} not found'.format(command):
-            raise self.PathError('{} is not in your path'.format(command))
-        self.command = os.path.abspath(self.command)
+        self.command = get_path(command)
 
         # Make sure args can be used
         if isinstance(self.args, (tuple, list)):
@@ -408,29 +406,23 @@ class Command(Step):
         if kind == 'get':
             return self.out
 
-    class PathError(Exception):
-
-        """Command not in path."""
-
-        def __init__(self, message):
-            super(Command.PathError, self).__init__()
-            log(message, kind='critical')
-
     class CommandError(Exception):
 
         """Failed to build the command."""
 
         def __init__(self, message):
-            super(Command.CommandError, self).__init__()
+            """Log message as well as raising."""
             log(message, kind='critical')
+            super(Command.CommandError, self).__init__()
 
     class CommandFailed(Exception):
 
         """Executed command returned non-zero."""
 
         def __init__(self, message):
-            super(Command.CommandFailed, self).__init__()
+            """Log message as well as raising."""
             log(message, kind='critical')
+            super(Command.CommandFailed, self).__init__()
 
 
 ###############################################################################
@@ -477,3 +469,26 @@ def chk(cmd):
     if data[-1:] == '\n':
         data = data[:-1]
     return status, data
+
+
+def get_path(executable):
+    """Use `which` to get the path of an executable.
+
+    Raises PathError on failure
+    :returns: Full absolute path on success
+    """
+    err, out = chk('which {}'.format(executable))
+    if err != 0 or out == '{} not found'.format(executable):
+        raise PathError('{} is not in your path'.format(executable))
+    else:
+        return os.path.abspath(out)
+
+
+class PathError(Exception):
+
+    """Command not in path."""
+
+    def __init__(self, message):
+        """Log message as well as raising."""
+        log(message, kind='critical')
+        super(PathError, self).__init__()
