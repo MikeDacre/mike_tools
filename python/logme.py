@@ -1,32 +1,34 @@
 """
 Logging with timestamps and optional log files.
 
-================================================================================
+===============================================================================
 
           FILE: logme
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-01-17 09:06
+ Last modified: 2016-01-17 10:56
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
                 Colored flags are INFO, WARNINING, ERROR, or CRITICAL.
-                It is possible to wrtie to both logfile and STDOUT/STDERR
+                It is possible to write to both logfile and STDOUT/STDERR
                 using the also_write argument.
-                'level' can also be provided, logs will only print if
-                level > kind. critical<error<warn<info<debug
+                If level is 'error' or 'critical', error is written to
+                STDERR unless also_write == -1
+                'min_level' can also be provided, logs will only print if
+                min_level > level. Level order: critical>error>warn>info>debug
 
          USAGE: import logme as lm
-                lm.log("Screw up!", <outfile>, kind='warn'|'error'|'normal',
-                       also_write='stderr'|'stdout', level='error')
+                lm.log("Screw up!", <outfile>, level='warn'|'error'|'normal',
+                       also_write='stderr'|'stdout', min_level='error')
 
                 All arguments are optional except for the initial message.
 
           NOTE: Uses terminal colors and STDERR, not compatible with non-unix
                 systems
 
-================================================================================
+===============================================================================
 """
 import sys
 import gzip
@@ -47,13 +49,14 @@ BOLD   = '\033[1m'
 ENDC   = '\033[0m'
 
 
-def log(message, logfile=sys.stderr, kind='info', also_write=None, level=None):
+def log(message, logfile=sys.stderr, level='info', also_write=None,
+        min_level='info', kind=None):
     """Print a string to logfile.
 
     :message: The message to print.
     :logfile: Optional file to log to, defaults to STDERR. Can provide a
               logging object
-    :kind:    Prefix. Defaults to 'normal', options:
+    :level:    Prefix. Defaults to 'normal', options:
         'debug':    '<timestamp> DEBUG --> '
         'info':     '<timestamp> INFO --> '
         'warn':     '<timestamp> WARNING --> '
@@ -62,36 +65,61 @@ def log(message, logfile=sys.stderr, kind='info', also_write=None, level=None):
     :also_write: 'stdout': print to STDOUT also.
     :also_write: 'stderr': print to STDERR also.
 
-    :level: The minimum print level, same flags as 'kind', must be greater
-            than 'kind' to print.
+    :min_level: The minimum print level, same flags as 'level', 'level' must be
+                greater than or equal to this to print. Ignored with logging
+                objects
+
+    :kind: synonym for level, kept to retain backwards compatibility
     """
     stdout = False
     stderr = False
     message = str(message)
 
+    if kind:
+        level=kind
+
+    # Level checking, not used with logging objects
+    level_map = {'debug': 0, 'info': 1, 'warn': 2, 'error': 3, 'critical': 4,
+                 'd': 0, 'i': 1, 'w': 2, 'e': 3, 'c': 4,
+                 0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+
+    try:
+        level = level_map[level]
+    except KeyError:
+        raise Exception('Invalid level {}'.format(level))
+
+    try:
+        min_level = level_map[min_level]
+    except KeyError:
+        raise Exception('Invalid min_level {}'.format(min_level))
+
+    if level > 2:
+        if also_write != -1 or also_write != 'stdout':
+            also_write = 'stderr'
+
     # Attempt to handle all file type
     if isinstance(logfile, (logging.RootLogger, logging.Logger)):
-        _logit(message, logfile, kind, color=False, level=level)
+        _logit(message, logfile, level, color=False, min_level=min_level)
     elif isinstance(logfile, str):
         with _open_zipped(logfile, 'a') as outfile:
-            _logit(message, outfile, kind, color=False, level=level)
+            _logit(message, outfile, level, color=False, min_level=min_level)
     elif str(getattr(logfile, 'name')).strip('<>') == 'stdout':
-        _logit(message, logfile, kind, color=True, level=level)
+        _logit(message, logfile, level, color=True, min_level=min_level)
         stdout = True
     elif str(getattr(logfile, 'name')).strip('<>') == 'stderr':
-        _logit(message, logfile, kind, color=True, level=level)
+        _logit(message, logfile, level, color=True, min_level=min_level)
         stderr = True
     elif getattr(logfile, 'closed'):
         with _open_zipped(logfile.name, 'a') as outfile:
-            _logit(message, outfile, kind, color=False, level=level)
+            _logit(message, outfile, level, color=False, min_level=min_level)
     else:
-        _logit(message, logfile, kind, color=False, level=level)
+        _logit(message, logfile, level, color=False, min_level=min_level)
 
     # Also print to stdout or stderr if requested
     if also_write == 'stdout' and not stdout:
-        _logit(message, sys.stdout, kind, color=True, level=level)
+        _logit(message, sys.stdout, level, color=True, min_level=min_level)
     elif also_write == 'stderr' and not stderr:
-        _logit(message, sys.stdout, kind, color=True, level=level)
+        _logit(message, sys.stdout, level, color=True, min_level=min_level)
 
 def clear(infile):
     """Truncate a file."""
@@ -103,28 +131,20 @@ def clear(infile):
 ###############################################################################
 
 
-def _logit(message, output, kind, color=False, level=None):
+def _logit(message, output, level, color=False, min_level=None):
     """Write message to file either with color or not.
 
     output must be filehandle or logging object.
     """
-    # Level checking, not used with logging objects
-    level_map = {'debug': 0, 'info': 1, 'warn': 2, 'error': 3, 'critical': 4,
-                 'd': 0, 'i': 1, 'w': 2, 'e': 3, 'c': 4,
-                 0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
-    flag_map  = {0: 'DEBUG', 1: 'INFO', 2: 'WARNING', 3: 'ERROR',
-                 4: 'CRITICAL'}
 
     now = dt.now()
     timestamp = "{0}.{1:<3}".format(now.strftime("%Y%m%d %H:%M:%S"),
                                     str(int(now.microsecond/1000)))
 
-    try:
-        kind = level_map[kind]
-    except KeyError:
-        raise Exception('Invalid kind {}'.format(kind))
+    flag_map  = {0: 'DEBUG', 1: 'INFO', 2: 'WARNING', 3: 'ERROR',
+                 4: 'CRITICAL'}
 
-    flag = flag_map[kind]
+    flag = flag_map[level]
     flag_len = len('{0} | {1} --> '.format(timestamp, flag)) - 2
 
     if color:
@@ -132,19 +152,19 @@ def _logit(message, output, kind, color=False, level=None):
 
     if isinstance(output, (logging.RootLogger, logging.Logger)):
         message = ' {} --> {}'.format(timestamp, message)
-        if kind == 0:
+        if level == 0:
             output.debug(message)
-        if kind == 1:
+        if level == 1:
             output.info(message)
-        if kind == 2:
+        if level == 2:
             output.warning(message)
-        if kind == 3:
+        if level == 3:
             output.error(message)
-        if kind == 4:
+        if level == 4:
             output.critical(message)
     else:
-        # Check level before proceeding
-        if kind < level_map[level]:
+        # Check min_level before proceeding
+        if level < min_level:
             return
 
         # Format multiline message
