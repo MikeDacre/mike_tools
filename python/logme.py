@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-01-16 15:27
+ Last modified: 2016-01-16 19:26
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -64,10 +64,10 @@ def log(message, logfile=sys.stderr, kind='normal', also_write=None):
     if isinstance(logfile, str):
         with _open_zipped(logfile, 'a') as outfile:
             _logit(message, outfile, kind, color=False)
-    elif getattr(logfile, 'name').strip('<>') == 'stdout':
+    elif str(getattr(logfile, 'name')).strip('<>') == 'stdout':
         _logit(message, logfile, kind, color=True)
         stdout = True
-    elif getattr(logfile, 'name').strip('<>') == 'stderr':
+    elif str(getattr(logfile, 'name')).strip('<>') == 'stderr':
         _logit(message, logfile, kind, color=True)
         stderr = True
     elif getattr(logfile, 'mode') == 'a':
@@ -87,6 +87,10 @@ def log(message, logfile=sys.stderr, kind='normal', also_write=None):
     elif also_write == 'stderr' and not stderr:
         _logit(message, sys.stdout, kind, color=True)
 
+def clear(infile):
+    """Truncate a file."""
+    open(infile, 'w').close()
+
 
 ###############################################################################
 #                              Private Functions                              #
@@ -95,6 +99,10 @@ def log(message, logfile=sys.stderr, kind='normal', also_write=None):
 
 def _logit(message, filehandle, kind, color=False):
     """Write message to file either with color or not."""
+    now = dt.now()
+    timestamp = "{0}.{1:<3}".format(now.strftime("%Y%m%d %H:%M:%S"),
+                                    str(int(now.microsecond/1000)))
+
     if kind == 'normal':
         flag = 'INFO'
     if kind == 'warn':
@@ -104,12 +112,19 @@ def _logit(message, filehandle, kind, color=False):
     if kind == 'critical':
         flag = 'CRITICAL'
 
+    flag_len = len('{0} | {1} --> '.format(timestamp, flag)) - 2
+
+    # Format multiline message
+    lines = message.split('\n')
+    if len(lines) != 1:
+        message = lines[0] + '\n'
+        lines = lines[1:]
+        for line in lines:
+            message = message + ''.ljust(flag_len, '-') + '> ' + line + '\n'
+
     if color:
         flag = _color(flag)
 
-    now = dt.now()
-    timestamp = "{}.{}".format(now.strftime("%Y%m%d %H:%M:%S"),
-                               str(int(now.microsecond/1000)))
     filehandle.write('{0} | {1} --> {2}\n'.format(timestamp, flag,
                                                   str(message)))
 
