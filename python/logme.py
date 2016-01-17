@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-01-16 19:26
+ Last modified: 2016-01-16 21:47
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -59,6 +59,7 @@ def log(message, logfile=sys.stderr, kind='normal', also_write=None):
     """
     stdout = False
     stderr = False
+    message = str(message)
 
     # Attempt to handle all file type and force append mode
     if isinstance(logfile, str):
@@ -70,16 +71,11 @@ def log(message, logfile=sys.stderr, kind='normal', also_write=None):
     elif str(getattr(logfile, 'name')).strip('<>') == 'stderr':
         _logit(message, logfile, kind, color=True)
         stderr = True
-    elif getattr(logfile, 'mode') == 'a':
-        if getattr(logfile, 'closed'):
-            with _open_zipped(logfile.name, 'a') as outfile:
-                _logit(message, outfile, kind, color=False)
-        else:
+    elif getattr(logfile, 'closed'):
+        with _open_zipped(logfile.name, 'a') as outfile:
             _logit(message, outfile, kind, color=False)
     else:
-        logfile.close()
-        logfile = _open_zipped(logfile.name, 'a')
-        _logit(message, outfile, kind, color=False)
+        _logit(message, logfile, kind, color=False)
 
     # Also print to stdout or stderr if requested
     if also_write == 'stdout' and not stdout:
@@ -122,8 +118,8 @@ def _logit(message, filehandle, kind, color=False):
         for line in lines:
             message = message + ''.ljust(flag_len, '-') + '> ' + line + '\n'
 
-    if color:
-        flag = _color(flag)
+    #  if color:
+        #  flag = _color(flag)
 
     filehandle.write('{0} | {1} --> {2}\n'.format(timestamp, flag,
                                                   str(message)))
