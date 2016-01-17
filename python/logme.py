@@ -7,17 +7,19 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-01-16 22:38
+ Last modified: 2016-01-17 09:06
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
                 Colored flags are INFO, WARNINING, ERROR, or CRITICAL.
                 It is possible to wrtie to both logfile and STDOUT/STDERR
                 using the also_write argument.
+                'level' can also be provided, logs will only print if
+                level > kind. critical<error<warn<info<debug
 
          USAGE: import logme as lm
                 lm.log("Screw up!", <outfile>, kind='warn'|'error'|'normal',
-                       also_write='stderr'|'stdout')
+                       also_write='stderr'|'stdout', level='error')
 
                 All arguments are optional except for the initial message.
 
@@ -45,19 +47,23 @@ BOLD   = '\033[1m'
 ENDC   = '\033[0m'
 
 
-def log(message, logfile=sys.stderr, kind='info', also_write=None):
+def log(message, logfile=sys.stderr, kind='info', also_write=None, level=None):
     """Print a string to logfile.
 
     :message: The message to print.
     :logfile: Optional file to log to, defaults to STDERR. Can provide a
               logging object
     :kind:    Prefix. Defaults to 'normal', options:
+        'debug':    '<timestamp> DEBUG --> '
         'info':     '<timestamp> INFO --> '
         'warn':     '<timestamp> WARNING --> '
         'error':    '<timestamp> ERROR --> '
         'critical': '<timestamp> CRITICAL --> '
     :also_write: 'stdout': print to STDOUT also.
     :also_write: 'stderr': print to STDERR also.
+
+    :level: The minimum print level, same flags as 'kind', must be greater
+            than 'kind' to print.
     """
     stdout = False
     stderr = False
@@ -65,27 +71,27 @@ def log(message, logfile=sys.stderr, kind='info', also_write=None):
 
     # Attempt to handle all file type
     if isinstance(logfile, (logging.RootLogger, logging.Logger)):
-        _logit(message, logfile, kind, color=False)
+        _logit(message, logfile, kind, color=False, level=level)
     elif isinstance(logfile, str):
         with _open_zipped(logfile, 'a') as outfile:
-            _logit(message, outfile, kind, color=False)
+            _logit(message, outfile, kind, color=False, level=level)
     elif str(getattr(logfile, 'name')).strip('<>') == 'stdout':
-        _logit(message, logfile, kind, color=True)
+        _logit(message, logfile, kind, color=True, level=level)
         stdout = True
     elif str(getattr(logfile, 'name')).strip('<>') == 'stderr':
-        _logit(message, logfile, kind, color=True)
+        _logit(message, logfile, kind, color=True, level=level)
         stderr = True
     elif getattr(logfile, 'closed'):
         with _open_zipped(logfile.name, 'a') as outfile:
-            _logit(message, outfile, kind, color=False)
+            _logit(message, outfile, kind, color=False, level=level)
     else:
-        _logit(message, logfile, kind, color=False)
+        _logit(message, logfile, kind, color=False, level=level)
 
     # Also print to stdout or stderr if requested
     if also_write == 'stdout' and not stdout:
-        _logit(message, sys.stdout, kind, color=True)
+        _logit(message, sys.stdout, kind, color=True, level=level)
     elif also_write == 'stderr' and not stderr:
-        _logit(message, sys.stdout, kind, color=True)
+        _logit(message, sys.stdout, kind, color=True, level=level)
 
 def clear(infile):
     """Truncate a file."""
@@ -97,39 +103,50 @@ def clear(infile):
 ###############################################################################
 
 
-def _logit(message, filehandle, kind, color=False):
-    """Write message to file either with color or not."""
+def _logit(message, output, kind, color=False, level=None):
+    """Write message to file either with color or not.
+
+    output must be filehandle or logging object.
+    """
+    # Level checking, not used with logging objects
+    level_map = {'debug': 0, 'info': 1, 'warn': 2, 'error': 3, 'critical': 4,
+                 'd': 0, 'i': 1, 'w': 2, 'e': 3, 'c': 4,
+                 0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+    flag_map  = {0: 'DEBUG', 1: 'INFO', 2: 'WARNING', 3: 'ERROR',
+                 4: 'CRITICAL'}
+
     now = dt.now()
     timestamp = "{0}.{1:<3}".format(now.strftime("%Y%m%d %H:%M:%S"),
                                     str(int(now.microsecond/1000)))
 
-    if kind == 'info':
-        flag = 'INFO'
-    elif kind == 'warn':
-        flag = 'WARNING'
-    elif kind == 'error':
-        flag = 'ERROR'
-    elif kind == 'critical':
-        flag = 'CRITICAL'
-    else:
+    try:
+        kind = level_map[kind]
+    except KeyError:
         raise Exception('Invalid kind {}'.format(kind))
 
+    flag = flag_map[kind]
     flag_len = len('{0} | {1} --> '.format(timestamp, flag)) - 2
 
     if color:
         flag = _color(flag)
 
-    if isinstance(filehandle, (logging.RootLogger, logging.Logger)):
+    if isinstance(output, (logging.RootLogger, logging.Logger)):
         message = ' {} --> {}'.format(timestamp, message)
-        if kind == 'info':
-            logging.info(message)
-        if kind == 'warn':
-            logging.warning(message)
-        if kind == 'error':
-            logging.error(message)
-        if kind == 'critical':
-            logging.critical(message)
+        if kind == 0:
+            output.debug(message)
+        if kind == 1:
+            output.info(message)
+        if kind == 2:
+            output.warning(message)
+        if kind == 3:
+            output.error(message)
+        if kind == 4:
+            output.critical(message)
     else:
+        # Check level before proceeding
+        if kind < level_map[level]:
+            return
+
         # Format multiline message
         lines = message.split('\n')
         if len(lines) != 1:
@@ -137,7 +154,7 @@ def _logit(message, filehandle, kind, color=False):
             lines = lines[1:]
             for line in lines:
                 message = message + ''.ljust(flag_len, '-') + '> ' + line + '\n'
-        filehandle.write('{0} | {1} --> {2}\n'.format(timestamp, flag,
+        output.write('{0} | {1} --> {2}\n'.format(timestamp, flag,
                                                       str(message)))
 
 
