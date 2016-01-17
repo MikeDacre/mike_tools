@@ -8,7 +8,7 @@ Easily manage a complex pipeline with python.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 1.0
        CREATED: 2016-14-15 16:01
- Last modified: 2016-01-16 16:11
+ Last modified: 2016-01-16 20:49
 
    DESCRIPTION: Classes and functions to make running a pipeline easy
 
@@ -49,15 +49,15 @@ class Pipeline(object):
 
     """A class to store and save the state of the current pipeline."""
 
-    def __init__(self, pickle_file=DEFAULT_FILE, prot=DEFAULT_PROT, root='.'):
+    def __init__(self, pickle_file=DEFAULT_FILE, root='.', prot=DEFAULT_PROT):
         """Setup initial variables and save."""
         self.step     = 'start'
         self.steps    = {}  # Command object by name
         self.order    = ()  # The order of the steps
         self.current  = None  # This will hold the step to run next
         self.file     = pickle_file
-        self.root_dir = os.path.abspath(root)
-        self.prot     = prot  # Can change version if required
+        self.root_dir = os.path.abspath(str(root))
+        self.prot     = int(prot)  # Can change version if required
         self.save()
 
     #####################
@@ -73,7 +73,7 @@ class Pipeline(object):
         with open(self.file, 'wb') as fout:
             pickle.dump(self, fout, protocol=self.prot)
 
-    def add(self, command, args=None, name=None, kind=''):
+    def add(self, command, args=None, name=None, kind='', store=True):
         """Wrapper for add_command and add_function.
 
         Attempts to detect kind, defaults to function
@@ -84,9 +84,9 @@ class Pipeline(object):
             else:
                 kind = 'function'
         if kind == 'command':
-            self.add_command(command, args, name)
+            self.add_command(command, args, name, store)
         elif kind == 'function':
-            self.add_function(command, args, name)
+            self.add_function(command, args, name, store)
         else:
             raise self.PipelineError('Invalid step type: {}'.format(kind))
 
@@ -103,11 +103,11 @@ class Pipeline(object):
             log('{} not in order tuple'.format(name), kind='warn')
         self.save()
 
-    def add_command(self, program, args=None, name=None):
+    def add_command(self, program, args=None, name=None, store=True):
         """Add a simple pipeline step via a Command object."""
         name = name if name else program.split('/')[-1]
         if name not in self.steps:
-            self.steps[name] = Command(program, args)
+            self.steps[name] = Command(program, args, store)
             self.order = self.order + (name,)
         else:
             log(('{} already in steps. Please choose another ' +
@@ -115,11 +115,11 @@ class Pipeline(object):
         self._get_current()
         self.save()
 
-    def add_function(self, function_call, args=None, name=None):
+    def add_function(self, function_call, args=None, name=None, store=True):
         """Add a simple pipeline step via a Command object."""
         name = name if name else str(function_call).lstrip('<').split(' ')[1]
         if name not in self.steps:
-            self.steps[name] = Function(function_call, args)
+            self.steps[name] = Function(function_call, args, store)
             self.order = self.order + (name,)
         else:
             log(('{} already in steps. Please choose another ' +
@@ -209,20 +209,13 @@ class Pipeline(object):
         for step in self.order:
             yield self.steps[step]
 
+    def __len__(self):
+        """Return number of steps."""
+        return len(self.order)
+
     def __str__(self):
         """Simple information about the class."""
-        output = 'Pipeline:'
-        if self.steps:
-            for step in self.order:
-                output = output + ' ' + step
-        else:
-            output = output + ' No steps'
-        return output
-
-    def __repr__(self):
-        """Detailed information about the class."""
-        output = "Pipeline(file={}, steps={})\n".format(self.file,
-                                                        len(self.order))
+        output = 'Pipeline:\n'
         if self.steps:
             names = ()
             steps = ()
@@ -233,7 +226,7 @@ class Pipeline(object):
                 statuses = statuses + (('Done' if self.steps[step].done
                                         else 'Not run'),)
             len1 = 7
-            len2 = max(len(i) for i in names) + 2
+            len2 = max(len(i) for i in names) + 4
             output = output + ('Step'.ljust(len1) + 'Name'.ljust(len2) +
                                'Status\n')
             for step in steps:
@@ -244,6 +237,16 @@ class Pipeline(object):
             output = output + "No steps assigned"
         return output
 
+    def __repr__(self):
+        """Detailed information about the class."""
+        output = ("<Pipeline(file={}, steps={}, " +
+                  "done={}, failed={})>").format(
+                      self.file,
+                      len(self.order),
+                      len([i for i in self.steps.values() if i.done]),
+                      len([i for i in self.steps.values() if i.failed]))
+        return output
+
     class PipelineError(Exception):
 
         """Failed pipeline steps."""
@@ -251,7 +254,7 @@ class Pipeline(object):
         def __init__(self, message):
             """Log message as well as raising."""
             log(message, kind='critical')
-            super(Pipeline.PipelineError, self).__init__()
+            super(Pipeline.PipelineError, self).__init__(message)
 
 
 ###############################################################################
@@ -268,13 +271,13 @@ class Step(object):
     directly you must add a run method.
     """
 
-    def __init__(self, command, args=None):
+    def __init__(self, command, args=None, store=True):
         """Set the program path and arguments."""
         self.command    = command
         self.args       = args
+        self.store      = store  # Store output on run
         self.done       = False  # We haven't run yet
         self.failed     = False
-        self.kind       = None
         self.start_time = None
         self.end_time   = None
         self.code       = None
@@ -282,18 +285,10 @@ class Step(object):
 
     def __str__(self):
         """Display simple class info."""
-        runmsg = 'Run' if self.done else 'Not run'
+        runmsg = 'Complete' if self.done else 'Not run'
         runmsg = 'Failed' if self.failed else runmsg
-        return "{}, args: {} {}".format(self.command, self.args,
-                                        runmsg.upper())
-
-    def __repr__(self):
-        """Print output if already run, else just args."""
-        output = "Step({0}='{1}', ".format('Command:', self.command)
-        if self.args:
-            output = output + "{0}='{1}')".format('Args:', self.args)
-        else:
-            output = output + "{0}='{1}')".format('Args:', 'None')
+        output =  "{}, args: {} {}\n".format(self.command, self.args,
+                                             runmsg.upper())
         if self.done or self.failed:
             timediff = str(dt.fromtimestamp(self.end_time) -
                            dt.fromtimestamp(self.start_time))
@@ -306,9 +301,20 @@ class Step(object):
             output = output + "{0:<11}{1}".format('Runtime:', timediff)
             if self.failed:
                 output = output + "\n\n\tWARNING --> Command Failed!"
-        else:
-            output = output + "\nExecution has not begun yet"
         return output
+
+    def __repr__(self):
+        """Print output if already run, else just args."""
+        if self.done:
+            stat = 'Done'
+        elif self.failed:
+            stat = 'Failed'
+        else:
+            stat = 'Not run'
+        return ("<Step(Kind={}, Command={}, Args='{}', Run={}, " +
+                "Code={}, Output={})>").format(
+                    type(self), self.command, self.args, stat, self.code,
+                    True if self.out else False)
 
 
 class Function(Step):
@@ -319,16 +325,15 @@ class Function(Step):
           not a string
     """
 
-    def __init__(self, command, args=None):
+    def __init__(self, command, args=None, store=True):
         """Build the function."""
-        super(Function, self).__init__(command, args)
+        super(Function, self).__init__(command, args, store)
         # Make sure args are a tuple
         if self.args:
             if not isinstance(self.args, tuple):
                 self.args = (self.args,)
-        self.kind = 'function'
 
-    def run(self, kind='check'):
+    def run(self, kind=''):
         """Execute the function with the provided args.
 
         Types:
@@ -336,6 +341,8 @@ class Function(Step):
                     output is still stored in self.out
             get   - return output
         """
+        if not kind:
+            kind = 'get' if self.store else 'check'
         self.start_time = time.time()
         try:
             if self.args:
@@ -358,23 +365,21 @@ class Command(Step):
 
     """A single external command as a pipeline step."""
 
-    def __init__(self, command, args=None):
+    def __init__(self, command, args=None, store=True):
         """Build the command."""
-        super(Command, self).__init__(command, args)
+        super(Command, self).__init__(command, args, store)
 
         # Make sure command exists
         self.command = get_path(command)
 
         # Make sure args can be used
-        if isinstance(self.args, (tuple, list)):
-            self.args = ' '.join(self.args)
-        if not isinstance(args, str):
-            raise self.CommandError('args must be string, list, or tuple')
+        if args:
+            if isinstance(self.args, (tuple, list)):
+                self.args = ' '.join(self.args)
+            if not isinstance(args, str):
+                raise self.CommandError('args must be string, list, or tuple')
 
-        # Set type
-        self.kind = 'command'
-
-    def run(self, kind='check'):
+    def run(self, kind=''):
         """Run the command.
 
         Shell is always True, meaning redirection and shell commands will
@@ -383,7 +388,9 @@ class Command(Step):
             check - check_call output not saved
             get   - return output
         """
-        command = self.command + self.args if self.args else self.command
+        if not kind:
+            kind = 'get' if self.store else 'check'
+        command = self.command + ' ' + self.args if self.args else self.command
         self.start_time = time.time()
         try:
             if kind == 'get':
@@ -412,8 +419,8 @@ class Command(Step):
 
         def __init__(self, message):
             """Log message as well as raising."""
+            super(Command.CommandError, self).__init__(message)
             log(message, kind='critical')
-            super(Command.CommandError, self).__init__()
 
     class CommandFailed(Exception):
 
@@ -422,7 +429,7 @@ class Command(Step):
         def __init__(self, message):
             """Log message as well as raising."""
             log(message, kind='critical')
-            super(Command.CommandFailed, self).__init__()
+            super(Command.CommandFailed, self).__init__(message)
 
 
 ###############################################################################
@@ -448,7 +455,9 @@ def get_pipeline(pickle_file=DEFAULT_FILE, root='.', prot=DEFAULT_PROT):
     if os.path.isfile(pickle_file):
         return restore_pipeline(pickle_file)
     else:
-        pipeline = Pipeline(pickle_file, os.path.abspath(root), prot)
+        pipeline = Pipeline(pickle_file=os.path.abspath(str(pickle_file)),
+                            root=os.path.abspath(str(root)),
+                            prot=int(prot))
         pipeline.save()
         return pipeline
 
@@ -491,4 +500,4 @@ class PathError(Exception):
     def __init__(self, message):
         """Log message as well as raising."""
         log(message, kind='critical')
-        super(PathError, self).__init__()
+        super(PathError, self).__init__(message)
