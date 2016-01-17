@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-01-16 21:47
+ Last modified: 2016-01-16 22:38
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -29,6 +29,7 @@ Logging with timestamps and optional log files.
 import sys
 import gzip
 import bz2
+import logging
 from datetime import datetime as dt
 
 __all__ = ['log']
@@ -44,15 +45,16 @@ BOLD   = '\033[1m'
 ENDC   = '\033[0m'
 
 
-def log(message, logfile=sys.stderr, kind='normal', also_write=None):
+def log(message, logfile=sys.stderr, kind='info', also_write=None):
     """Print a string to logfile.
 
     :message: The message to print.
-    :logfile: Optional file to log to, defaults to STDERR.
+    :logfile: Optional file to log to, defaults to STDERR. Can provide a
+              logging object
     :kind:    Prefix. Defaults to 'normal', options:
-        'normal':   '<timestamp> INFO --> '
+        'info':     '<timestamp> INFO --> '
         'warn':     '<timestamp> WARNING --> '
-        'class':    '<timestamp> ERROR --> '
+        'error':    '<timestamp> ERROR --> '
         'critical': '<timestamp> CRITICAL --> '
     :also_write: 'stdout': print to STDOUT also.
     :also_write: 'stderr': print to STDERR also.
@@ -61,8 +63,10 @@ def log(message, logfile=sys.stderr, kind='normal', also_write=None):
     stderr = False
     message = str(message)
 
-    # Attempt to handle all file type and force append mode
-    if isinstance(logfile, str):
+    # Attempt to handle all file type
+    if isinstance(logfile, (logging.RootLogger, logging.Logger)):
+        _logit(message, logfile, kind, color=False)
+    elif isinstance(logfile, str):
         with _open_zipped(logfile, 'a') as outfile:
             _logit(message, outfile, kind, color=False)
     elif str(getattr(logfile, 'name')).strip('<>') == 'stdout':
@@ -99,30 +103,42 @@ def _logit(message, filehandle, kind, color=False):
     timestamp = "{0}.{1:<3}".format(now.strftime("%Y%m%d %H:%M:%S"),
                                     str(int(now.microsecond/1000)))
 
-    if kind == 'normal':
+    if kind == 'info':
         flag = 'INFO'
-    if kind == 'warn':
+    elif kind == 'warn':
         flag = 'WARNING'
-    if kind == 'error':
+    elif kind == 'error':
         flag = 'ERROR'
-    if kind == 'critical':
+    elif kind == 'critical':
         flag = 'CRITICAL'
+    else:
+        raise Exception('Invalid kind {}'.format(kind))
 
     flag_len = len('{0} | {1} --> '.format(timestamp, flag)) - 2
 
-    # Format multiline message
-    lines = message.split('\n')
-    if len(lines) != 1:
-        message = lines[0] + '\n'
-        lines = lines[1:]
-        for line in lines:
-            message = message + ''.ljust(flag_len, '-') + '> ' + line + '\n'
+    if color:
+        flag = _color(flag)
 
-    #  if color:
-        #  flag = _color(flag)
-
-    filehandle.write('{0} | {1} --> {2}\n'.format(timestamp, flag,
-                                                  str(message)))
+    if isinstance(filehandle, (logging.RootLogger, logging.Logger)):
+        message = ' {} --> {}'.format(timestamp, message)
+        if kind == 'info':
+            logging.info(message)
+        if kind == 'warn':
+            logging.warning(message)
+        if kind == 'error':
+            logging.error(message)
+        if kind == 'critical':
+            logging.critical(message)
+    else:
+        # Format multiline message
+        lines = message.split('\n')
+        if len(lines) != 1:
+            message = lines[0] + '\n'
+            lines = lines[1:]
+            for line in lines:
+                message = message + ''.ljust(flag_len, '-') + '> ' + line + '\n'
+        filehandle.write('{0} | {1} --> {2}\n'.format(timestamp, flag,
+                                                      str(message)))
 
 
 def _color(flag):
