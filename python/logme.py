@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-01-17 10:56
+ Last modified: 2016-01-17 17:11
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -76,7 +76,7 @@ def log(message, logfile=sys.stderr, level='info', also_write=None,
     message = str(message)
 
     if kind:
-        level=kind
+        level = kind
 
     # Level checking, not used with logging objects
     level_map = {'debug': 0, 'info': 1, 'warn': 2, 'error': 3, 'critical': 4,
@@ -121,9 +121,31 @@ def log(message, logfile=sys.stderr, level='info', also_write=None,
     elif also_write == 'stderr' and not stderr:
         _logit(message, sys.stdout, level, color=True, min_level=min_level)
 
+
 def clear(infile):
     """Truncate a file."""
     open(infile, 'w').close()
+
+
+###############################################################################
+#                             A Logging Exception                             #
+###############################################################################
+
+
+class LoggingException(Exception):
+
+    """Log a critical message with logme and also raise."""
+
+    def __init__(self, message, logfile=None):
+        """Log message as critical, raise with first line."""
+        args = {'kind': 'critical'}
+        if logfile:
+            args.update({'logfile': logfile})
+        # Log with logme
+        log(message, **args)
+        # Raise with the first line of the log
+        message = message.split('\n')[0]
+        super(LoggingException, self).__init__(message)
 
 
 ###############################################################################
@@ -136,7 +158,6 @@ def _logit(message, output, level, color=False, min_level=None):
 
     output must be filehandle or logging object.
     """
-
     now = dt.now()
     timestamp = "{0}.{1:<3}".format(now.strftime("%Y%m%d %H:%M:%S"),
                                     str(int(now.microsecond/1000)))
@@ -173,9 +194,10 @@ def _logit(message, output, level, color=False, min_level=None):
             message = lines[0] + '\n'
             lines = lines[1:]
             for line in lines:
-                message = message + ''.ljust(flag_len, '-') + '> ' + line + '\n'
+                message = message + (''.ljust(flag_len, '-') + '> ' +
+                                     line + '\n')
         output.write('{0} | {1} --> {2}\n'.format(timestamp, flag,
-                                                      str(message)))
+                                                  str(message)))
 
 
 def _color(flag):
