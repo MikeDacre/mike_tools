@@ -11,8 +11,9 @@ from pytest import main
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('-n', '--name')
     parser.add_argument('--logtoprint')
-    parser.add_argument('--deletelog', action='store_true')
+    parser.add_argument('--nodeletelog', action='store_true')
     parser.add_argument('-h', '--help', action='store_true')
     script = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
     args, remaining = parser.parse_known_args()
@@ -22,9 +23,16 @@ if __name__ == '__main__':
         sys.argv = [script, '--help']
     else:
         sys.argv = [script] + remaining
+    if args.name and not args.logtoprint:
+        sys.argv = sys.argv + [args.name]
+        name = args.name.split('.')
+        name = name[0] if len(name) == 1 else '.'.join(name[:-1])
+        name = name + '.log'
+    else:
+        name = args.logtoprint
     code = main()
-    if args.logtoprint and not args.help:
-        os.system('cat ' + args.logtoprint)
-        if args.deletelog:
-            os.remove(args.logtoprint)
+    if name and os.path.isfile(name):
+        os.system('cat ' + name)
+        if not args.nodeletelog:
+            os.remove(name)
     sys.exit(code)
