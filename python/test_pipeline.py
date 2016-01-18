@@ -1,7 +1,7 @@
+"""Test the pipeline.py code for errors."""
 import os
-import sys
-import pipeline as pl
 import pytest
+import pipeline as pl
 from logme import log
 
 PIPELINE_FILE = 'test.test'
@@ -10,34 +10,59 @@ MIN_LEVEL = 'info'
 
 pipeline_output = ''
 
+EXPECTED_OUTPUT="""Pipeline:
+Step   Name               Status
+0      ls                 Done
+1      bob                Done
+2      write_something    Done
+3      run2               Done
+4      tofail             FAILED
+5      for                Done
+"""
+
 ###############################################################################
 #                           Non-Test Functions                                #
 ###############################################################################
 
+
 def lg(msg, level):
-    """Run logme log with LOGFILE"""
+    """Run logme log with LOGFILE."""
     log(msg, LOGFILE, level=level, min_level=MIN_LEVEL)
 
 
 def write_something(msg):
-    """Write msg to stdout"""
+    """Write msg to stdout."""
     return(msg + '\n')
 
 
 def get_pipeline():
     """Get the pipeline object."""
-    return  pl.get_pipeline(PIPELINE_FILE)
+    return pl.get_pipeline(PIPELINE_FILE)
 
 
 def create_pipeline():
-    """Create pipeline"""
+    """Create pipeline."""
     pl.get_pipeline(PIPELINE_FILE)
 
 
 def remove_pipeline():
-    """Delete pipeline file"""
+    """Delete pipeline file."""
     if os.path.exists(PIPELINE_FILE):
         os.remove(PIPELINE_FILE)
+
+
+def write_file(filename='foo', string='bar'):
+    """Write string to a file."""
+    with open(filename, 'w') as fout:
+        fout.write(string + '\n')
+
+
+def check_file(filename='foo', string='bar'):
+    """Check that a file contains a string."""
+    with open(filename) as fin:
+        file_string = fin.read().rstrip()
+    os.remove(filename)  # Clean up
+    return True if file_string == string else False
 
 
 ###############################################################################
@@ -67,12 +92,12 @@ def test_additions():
 
 
 def test_restore():
-    """Make sure methods still exist"""
+    """Make sure methods still exist."""
     pip = get_pipeline()
     assert len(pip) == 5
     assert pip['bob'].command == pl.get_path('ls')
     assert pip['bob'].args == '~'
-    assert pip['bob'].done == False
+    assert pip['bob'].done is False
     assert isinstance(pip['bob'], pl.Command)
     assert isinstance(pip['run2'], pl.Function)
     assert isinstance(pip['tofail'], pl.Command)
@@ -89,21 +114,19 @@ def test_run():
     with pytest.raises(pl.Command.CommandFailed):
         pip.run_all()
     for step in list(pip)[:4]:
-        assert step.done == True
-    assert pip['tofail'].done == False
-    lg('Failed: ' + str(pip['tofail'].failed), level='critical')
-    assert pip['tofail'].failed == True
+        assert step.done is True
+    assert pip['tofail'].done is False
+    assert pip['tofail'].failed is True
     lg(str(get_pipeline()), level=0)
 
 
 def test_output():
-    """Print the outputs from the commands"""
+    """Print the outputs from the commands."""
     pip = get_pipeline()
     assert pip['write_something'].out == 'call1\n'
-    lg(str(repr(pip['tofail'])), level=2)
-    assert pip['tofail'].err.endswith('No such file or directory')
-    for step in pip[:4]:
+    for step in list(pip)[:4]:
         assert step.out is not None
+    assert pip['tofail'].err.endswith('No such file or directory')
 
 
 def test_simple_command():
@@ -112,15 +135,17 @@ def test_simple_command():
     pip.add('for i in $(ls); do echo hi $i; done | sort')
     pip.run('for')
     assert pip['for'].out
-    assert pip['for'].done == True
+    assert pip['for'].done is True
 
 
 def test_display():
-    """Print all string objects from classes"""
+    """Print all string objects from classes."""
     pip = get_pipeline()
+    assert str(pip) == EXPECTED_OUTPUT
     lg(str(pip), level=1)
     for step in pip:
-        lg(str(step), level=1)
+        lg(str(step), level=0)
+
 
 def test_fail_add():
     """Add a nonexistent path, expect failure."""
@@ -133,7 +158,38 @@ def test_fail_add():
     with pytest.raises(pl.Command.CommandFailed):
         pip.run('john')
 
+
+def test_bad_failtest():
+    """Try to add a string as a failtest, expect failure."""
+    pip = get_pipeline()
+    with pytest.raises(pl.Step.StepError):
+        pip.add('ls', name='badfailtest', failtest='bob')
+
+
+def test_good_failtest():
+    """Submit a good function call and a tuple as failtests."""
+    pip = get_pipeline()
+    pip.add(write_file, name='write1', failtest=check_file)
+    pip.add(write_file, 'bob', name='write2', failtest=(check_file, 'bob'))
+    pip['write1'].run()
+    pip['write2'].run()
+
+
+def test_failing_failtest():
+    """Submit a failtest that will fail. Expect failure."""
+    pip = get_pipeline()
+    pip.add(write_file, ('fred', 'hi'), name='write3', failtest=(
+        check_file, ('fred', 'bob')))
+    with pytest.raises(pl.Step.FailedTest):
+        pip['write3'].run()
+    pip.add(write_file, ('joe', 'hi'), name='write4', failtest=(
+        check_file, ('joeseph', 'hi')))
+    with pytest.raises(OSError):
+        pip['write4'].run()
+    os.remove('joe')
+
+
 def test_remove_files():
-    """Remove the pickle file"""
+    """Remove the pickle file."""
     os.remove(PIPELINE_FILE)
-    #  os.remove(PIPELINE_FILE + '.log')
+    os.remove(PIPELINE_FILE + '.log')
