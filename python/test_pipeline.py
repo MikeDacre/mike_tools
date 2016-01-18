@@ -37,7 +37,9 @@ def write_something(msg):
 
 def get_pipeline():
     """Get the pipeline object."""
-    return pl.get_pipeline(PIPELINE_FILE)
+    pip = pl.get_pipeline(PIPELINE_FILE)
+    pip.loglev = 'debug'
+    return pip
 
 
 def create_pipeline():
@@ -59,6 +61,7 @@ def write_file(filename='foo', string='bar'):
 
 def check_file(filename='foo', string='bar'):
     """Check that a file contains a string."""
+    lg(str(filename) + str(string), level='critical')
     with open(filename) as fin:
         file_string = fin.read().rstrip()
     os.remove(filename)  # Clean up
@@ -189,7 +192,27 @@ def test_failing_failtest():
     os.remove('joe')
 
 
+def test_pretest():
+    """Add a command with a succeeding pretest."""
+    pip = get_pipeline()
+    write_file('f1', 'hi')
+    pip.add(print, 'hi', pretest=(check_file, ('f1', 'hi')))
+    pip['print'].run()
+    assert os.path.exists('f1') is False
+    assert pip['print'].done is True
+
+
+def test_failing_pretest():
+    """Add a command with a failing pretest."""
+    pip = get_pipeline()
+    pip.add(print, 'hi', name='print2', pretest=(check_file, ('f2', 'hi')))
+    with pytest.raises(OSError):
+        pip['print2'].run()
+    assert pip['print2'].done is False
+    assert pip['print2'].failed_pre is True
+
+
 def test_remove_files():
     """Remove the pickle file."""
     os.remove(PIPELINE_FILE)
-    os.remove(PIPELINE_FILE + '.log')
+    #  os.remove(PIPELINE_FILE + '.log')
