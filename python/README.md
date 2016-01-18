@@ -53,7 +53,28 @@ Dictionary format: {'chr': (position, p-value)}
 logme
 -----
 
-A simple function to print a log with a timestamp
+A simple function to print a log with a timestamp. Also provides an exception class with logging support.
+
+Use examples:
+
+    from logme import log
+    LOG_LEVEL = 'warn'
+    log('This won't be printed', level='info', min_level=LOG_LEVEL)
+  
+No output
+
+    log('This will be written to the file', 'mylog.txt', level='warn', min_level=LOG_LEVEL)
+
+Output (appended to mylog.txt):
+
+    20160117 18:22:11.887 | WARNING --> This will be written to the file
+
+Any filehandle can be used instead of 'mylog.txt', if no file is provided, STDERR is used. If STDOUT or STDERR are used, the flag (e.g. 'INFO' or 'CRITICAL') will be colored according to severity. Multi-line logs are indented like this:
+
+    20160117 18:22:11.887 | WARNING --> This will be written to the file
+    ----------------------------------> This is another line
+
+A logging object can also be used, in which can only the timestamp will be added, and newlines will not be indented.
 
 mike.py
 -------
