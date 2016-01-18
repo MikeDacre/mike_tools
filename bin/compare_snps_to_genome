@@ -1,0 +1,124 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+============================================================================
+
+        AUTHOR: Michael D Dacre, mike.dacre@gmail.com
+  ORGANIZATION: Stanford University
+       LICENSE: MIT License, property of Stanford, use as you wish
+       VERSION: 0.1
+       CREATED: 2016-15-13 18:01
+ Last modified: 2016-01-15 11:59
+
+   DESCRIPTION: Take a SNP file in either Bed or VCF format and a list of
+                FastA files compare all SNPs to the equivalent position in
+                the genome creating three lists to describe matches:
+                    ref, alt, and no_match
+
+                Then, either print the counts from each list per chromosome
+                as a tab delimited sheet (--sheet), or a pretty list
+                (--pretty), or alternatively plot them as a bar chart
+                (--plot)
+
+          NOTE: All files can be plain text, gzipped, or bz2zipped
+
+============================================================================
+"""
+import os
+import sys
+import argparse
+from compare_snps_to_genome import *
+
+
+def main(argv=None):
+    """ Run as a script """
+    if not argv:
+        argv = sys.argv[1:]
+
+    usage  = ("compare_snps_to_genome [-b 0|1] snp_file.bed genome.fa\n" +
+              "       compare_snps_to_genome [-b 0|1] snp_file.vcf chr1.fa.gz [chr2.fa.bz2 ...]\n" +
+              "       compare_snps_to_genome [-b 0|1] snp_file.bed genome/\n" +
+              "       compare_snps_to_genome -h  #Show help\n\n")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        usage=usage,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    # Input Files
+    optfiles = parser.add_argument_group('Input Files')
+    optfiles.add_argument('snp_file',
+                          help="SNP File, either bed or vcf. gz or bz2 ok")
+    optfiles.add_argument('genome', nargs='+',
+                          help=("Genome. Either a file, a list of files, " +
+                                "or a directory of files. FastA format. " +
+                                "gz or bz2 ok."))
+
+    # Optional Flags
+    base = parser.add_argument_group('Base of SNP file')
+    base.add_argument('-b', '--base', type=int,
+                      help=("Base of the SNP file, either 0 or 1. " +
+                            "0 assumed for bed and 1 for vcf."))
+
+    # Output Files
+    ouputs = parser.add_argument_group('Output Files')
+    ouputs.add_argument('-p', '--print', action='store_true',
+                        help=("Print lists to STDOUT. Only required " +
+                              "if other output formats provided, " +
+                              "otherwise it is on by default."))
+    ouputs.add_argument('--sheet',
+                        help="Print a tab delimited sheet to this file")
+    ouputs.add_argument('--plot',
+                        help="Plot a bar chart to this file.")
+
+    args = parser.parse_args(argv)
+
+    # Parse SNP file
+    arg_list = (args.snp_file,)
+    arg_list = arg_list + (args.base,) if args.base else arg_list
+    if 'bed' in args.snp_file.split('.'):
+        snps = parse_bed(*arg_list)
+    elif 'vcf' in args.snp_file.split('.'):
+        snps = parse_vcf(*arg_list)
+    else:
+        sys.stderr.write('{0} is not a bed or vcf\n'.format(
+            args.snp_file))
+        return 1
+
+    # Create a list of fasta files
+    fasta_files = []
+    for i in args.genome:
+        if os.path.isfile(i):
+            fasta_files.append(i)
+        elif os.path.isdir(i):
+            files = os.listdir(i)
+            for file in files:
+                names = file.split('.')
+                if 'fasta' in names \
+                        or 'fa' in names:
+                    fasta_files.append(os.path.join(i, file))
+
+    # Get a SeqIO object from fasta list
+    genome = create_seqio_list(fasta_files)
+
+    # Add lists to chromsomes
+    comp_snps_to_chr(snps, genome)
+
+    # Print/graph outputs
+    if args.sheet:
+        output_table(snps, args.sheet)
+        pr_lists = True if args.print else False
+    else:
+        pr_lists = True
+
+    if args.plot:
+        with open(args.plot, 'w') as fout:
+            plot_snps(snps).savefig(fout)
+        pr_lists = True if args.print else False
+    else:
+        pr_lists = True
+
+    if pr_lists:
+        print_lists(snps)
+
+if __name__ == '__main__' and '__file__' in globals():
+    sys.exit(main())
