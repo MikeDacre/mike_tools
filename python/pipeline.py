@@ -8,7 +8,7 @@ Easily manage a complex pipeline with python.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 1.0.1
        CREATED: 2016-14-15 16:01
- Last modified: 2016-01-18 00:30
+ Last modified: 2016-01-18 09:09
 
    DESCRIPTION: Classes and functions to make running a pipeline easy
 
@@ -20,7 +20,7 @@ Easily manage a complex pipeline with python.
                 def my_test():
                     return True if os.path.isfile('vcf_file') else False
                 pipeline.add('cat bed_file | bed_to_vcf > vcf_file',
-                             name='bed2vcf2', failtest=my_test)
+                             name='bed2vcf2', donetest=my_test)
                 def my_fun(no1, no2):
                     return no1 + no2
                 pipeline.add(my_fun, (1, 2))
@@ -94,7 +94,7 @@ class Pipeline(object):
             pickle.dump(self, fout, protocol=self.prot)
 
     def add(self, command, args=None, name=None, kind='', store=True,
-            failtest=None, pretest=None):
+            donetest=None, pretest=None, depends=None):
         """Wrapper for add_command and add_function.
 
         Attempts to detect kind, defaults to function
@@ -106,15 +106,18 @@ class Pipeline(object):
         :kind:     Force either 'function' or 'command'
         :store:    Store all output in '.out'. This is always true for
                    functions.
-        :failtest: An optional function to test for success. Will always be run
+        :donetest: An optional function to test for success. Will always be run
                    right after successful execution of this step. This can be
                    either a single function call or a tuple of (function_call,
                    args). Function call must be an actual function, not a
                    string or anything else.
-                   If failtest function returns True or 0, the test is a
+                   If donetest function returns True or 0, the test is a
                    success, otherwise it is assumed that this step failed.
-        :pretest:  Like failtest but run before step, must be True for step to
+                   donetest can also be run before a job is run, to mark it as
+                   done and avoid unnecessary execution.
+        :pretest:  Like donetest but run before step, must be True for step to
                    run.
+        :depends:  A list of dependencies that must run before this job.
         """
         if not kind:
             if isinstance(command, str):
@@ -122,9 +125,11 @@ class Pipeline(object):
             else:
                 kind = 'function'
         if kind == 'command':
-            self.add_command(command, args, name, store, failtest, pretest)
+            self.add_command(command, args, name, store, donetest, pretest,
+                             depends)
         elif kind == 'function':
-            self.add_function(command, args, name, store, failtest, pretest)
+            self.add_function(command, args, name, store, donetest, pretest,
+                              depends)
         else:
             raise self.PipelineError('Invalid step type: {}'.format(kind),
                                      self.logfile)
@@ -143,13 +148,13 @@ class Pipeline(object):
         self.save()
 
     def add_command(self, program, args=None, name=None, store=True,
-                    failtest=None, pretest=None):
+                    donetest=None, pretest=None, depends=None):
         """Add a simple pipeline step via a Command object."""
         name = name if name else program.split(' ')[0].split('/')[-1]
         if name not in self.steps:
             self.steps[name] = Command(program, args, store, parent=self,
-                                       failtest=failtest, pretest=pretest,
-                                       name=name)
+                                       donetest=donetest, pretest=pretest,
+                                       name=name, depends=depends)
             self.order = self.order + (name,)
         else:
             self.log(('{} already in steps. Please choose another ' +
@@ -158,7 +163,7 @@ class Pipeline(object):
         self.save()
 
     def add_function(self, function_call, args=None, name=None, store=True,
-                     failtest=None, pretest=None):
+                     donetest=None, pretest=None, depends=None):
         """Add a simple pipeline step via a Command object."""
         if not name:
             parts = str(function_call).strip('<>').split(' ')
@@ -170,8 +175,9 @@ class Pipeline(object):
             name = parts[0]
         if name not in self.steps:
             self.steps[name] = Function(function_call, args, store,
-                                        parent=self, failtest=failtest,
-                                        pretest=pretest, name=name)
+                                        parent=self, donetest=donetest,
+                                        pretest=pretest, name=name,
+                                        depends=depends)
             self.order = self.order + (name,)
         else:
             self.log(('{} already in steps. Please choose another ' +
@@ -182,21 +188,6 @@ class Pipeline(object):
     #############
     #  Running  #
     #############
-
-    def run_all(self, force=False):
-        """Run all steps in order.
-
-        Skip already completed steps unless force is True, in which case
-        run all anyway
-        """
-        self._get_current()
-        self.save()
-        for step in self.order:
-            if not force and self.steps[step].done:
-                continue
-            self.run(step)
-        self._get_current()
-        self.save()
 
     def run(self, step='current'):
         """Run a specific step by name.
@@ -230,6 +221,65 @@ class Pipeline(object):
                 step), self.logfile)
         self._get_current()
         self.save()
+
+    def run_all(self, force=False):
+        """Run all steps in order.
+
+        Skip already completed steps unless force is True, in which case
+        run all anyway
+        """
+        self._get_current()
+        self.save()
+        for step in self.order:
+            if not force and self.steps[step].done:
+                continue
+            self.run(step)
+        self._get_current()
+        self.save()
+
+    ######################
+    #  Parallel Running  #
+    ######################
+
+    def run_parallel(self, job_list, auto_resubmit=False, tries=5, delay=60,
+                     raise_on_error=False):
+        """Run job_list (tuple of step names) in parallel.
+
+        Runs all jobs in job_list (a tuple or list) in parallel. It is
+        HIGHLY recommended that the dependency lists for all jobs are
+        populated before running this. Jobs will not run until their
+        dependencies are satisfied.
+
+        It is possible to have jobs autoresubmit on failure, up to a max of
+        'tries' times, with a pause of 'delay' seconds between attempts.
+
+        :job_list:       Tuple or list of valid step names.
+        :auto_resubmit:  If true, autoresubmit jobs 'tries' times.
+        :tries:          Number of times to auto_resubmit.
+        :delay:          Time in seconds between resubmits.
+        :raise_on_error: Abort with CommandFailed if job fails.
+        :returns: None
+        """
+        pass  # TODO
+
+    ################
+    #  Job Checks  #
+    ################
+
+    def check(self, step, fail_on_error=False, raise_on_error=False):
+        """Run donetest on 'step' and mark done if true.
+
+        The point of this function is to quickly mark a jobs that pass a
+        donetest as done so that it won't have to run again.
+        :fail_on_error:  Mark job as 'failed' if donetest fails.
+        :raise_on_error: Raise a FailedTest Exception on failing donetest.
+        :returns: None
+        """
+        pass  # TODO
+
+    def check_all(self, fail_on_error=False, raise_on_error=False):
+        """Run check() (donetest) on every job and mark done if true."""
+        pass  # TODO
 
     ###############
     #  Internals  #
@@ -347,27 +397,34 @@ class Step(object):
     """
 
     def __init__(self, command, args=None, store=True, parent=None,
-                 failtest=None, pretest=None, name='unknown step'):
+                 donetest=None, pretest=None, name='unknown step',
+                 depends=None):
         """Set the program path and arguments.
 
         :command:  The command, script, or function call to be executed.
         :args:     Optional arguments to pass with command.
         :store:    Capture output to out and (if shell executed) err.
         :parent:   The Pipeline object that owns this child.
-        :failtest: An optional function call (or tuple of (function, args))
+        :donetest: An optional function call (or tuple of (function, args))
                    to be executed following run. Must return True on success
                    or False on failure.
+                   Can also be run before execution, if it returns True then,
+                   execution will be skipped and the step will be marked done.
         :pretest:  Like pretest but run before execution, must be True to run.
+        :name:     Optional name for this step.
+        :depends:  String or list/tuple of names of jobs that must complete
+                   before this one will run.
         """
         self.command     = command
         self.args        = args
         self.store       = store   # Store output on run
         self.parent      = parent  # The Pipeline object that created us
         self.name        = name    # Should match name in parent dictionary
+        self.depends     = []
         self.done        = False   # We haven't run yet
         self.failed      = False
         self.failed_pre  = False
-        self.failed_test = False
+        self.failed_done = False
         self.start_time  = None
         self.end_time    = None
         self.code        = None
@@ -376,12 +433,17 @@ class Step(object):
         self.logfile     = self.parent.logfile if self.parent.logfile else None
         self.loglev      = self.parent.loglev if self.parent.loglev \
             else LOG_LEVEL
+        # Make sure dependencies are stored as a list
+        if isinstance(depends, str):
+            self.depends = [depends]
+        elif isinstance(depends, tuple):
+            self.depends = list(depends)
         # Test the tests now to avoid frustration
-        if failtest:
-            self.failtest = failtest
-            self._test_test(self.failtest)
+        if donetest:
+            self.donetest = donetest
+            self._test_test(self.donetest)
         else:
-            self.failtest = None
+            self.donetest = None
         if pretest:
             self.log('Pretest added', level=0)
             self.pretest = pretest
@@ -393,14 +455,14 @@ class Step(object):
     #  Execution Tests  #
     #####################
 
-    def run_test(self, test, raise_error_on_fail=True):
+    def run_test(self, test, raise_on_fail=True):
         """Run a test function.
 
         Will evalucate to success if test function returns True or 0, failure
         on any other return. Any exceptions raised during the handling will
         cause failure.
 
-        If raise_error_on_fail is True, a FailedTest Exception or the
+        If raise_on_fail is True, a FailedTest Exception or the
         function's own Exception will be raised. Otherwise they will not.
         """
         self.log('Running test ' + str(test), level=0)
@@ -418,57 +480,60 @@ class Step(object):
         else:
             if self.parent:
                 self.parent.save()
-            if raise_error_on_fail:
+            if raise_on_fail:
                 raise self.FailedTest(
                     'Fail test failed with function output {}'.format(out),
                     self.logfile)
             else:
                 return False
 
-    def run_fail_test(self, raise_error_on_fail=True):
+    def run_done_test(self, fail_step_on_error=False, raise_on_fail=True):
         """Run a fail test with run_test and set self.failed & self done."""
-        if not self.failtest:
-            raise self.StepError('Cannot run failtest if failtest function ' +
+        if not self.donetest:
+            raise self.StepError('Cannot run donetest if donetest function ' +
                                  'not assigned', logfile=self.logfile)
         try:
-            out = self.run_test(self.failtest, raise_error_on_fail)
+            out = self.run_test(self.donetest, raise_on_fail)
         except:
             self.done        = False
-            self.failed      = True
-            self.failed_test = True
+            if fail_step_on_error:
+                self.failed  = True
+            self.failed_done = True
             if self.parent:
                 self.parent.save()
-            if raise_error_on_fail:
+            if raise_on_fail:
                 raise
             else:
                 return False
 
         if out is True:
-            self.done   = True
-            self.failed = False
+            self.done        = True
+            self.failed      = False
+            self.failed_done = False
             if self.parent:
                 self.parent.save()
             return True
         else:
             self.done        = False
-            self.failed      = True
-            self.failed_test = True
+            if fail_step_on_error:
+                self.failed  = True
+            self.failed_done = True
             if self.parent:
                 self.parent.save()
             return False
 
-    def run_pre_test(self, raise_error_on_fail=True):
+    def run_pre_test(self, raise_on_fail=True):
         """Run a fail test with run_test and set self.failed & self done."""
         if not self.pretest:
             raise self.StepError('Cannot run pretest if pretest function ' +
                                  'not assigned', logfile=self.logfile)
         try:
-            out = self.run_test(self.pretest, raise_error_on_fail)
+            out = self.run_test(self.pretest, raise_on_fail)
         except:
             self.failed_pre = True
             if self.parent:
                 self.parent.save()
-            if raise_error_on_fail:
+            if raise_on_fail:
                 raise
             else:
                 return False
@@ -530,14 +595,14 @@ class Step(object):
                 fmessage = ''
             output = output + 'Pretest: {} {}\n'.format(self.pretest,
                                                         fmessage)
-        if self.failtest:
-            if self.failed_test:
+        if self.donetest:
+            if self.failed_done:
                 fmessage = '[FAILED]'
             elif self.done:
                 fmessage = '[DONE]'
             else:
                 fmessage = ''
-            output = output + 'Failtest {} {}\n'.format(self.failtest,
+            output = output + 'Donetest {} {}\n'.format(self.donetest,
                                                         fmessage)
 
         if self.done or self.failed:
@@ -564,13 +629,13 @@ class Step(object):
             stat = 'Not run'
         pretest = str(self.pretest) + ' [FAILED]' if self.failed_pre \
             else str(self.pretest)
-        failtest = str(self.failtest) + ' [FAILED]' if self.failed_test \
-            else str(self.failtest)
+        donetest = str(self.donetest) + ' [FAILED]' if self.failed_done \
+            else str(self.donetest)
         return ("<Step(Class={0}, Command={1}, Args='{2}', Pretest={3}, " +
                 "Failtest={4}, Run={5}, Code={6}, Output={7}, STDERR={8}, " +
                 "Store={9})>").format(
                     type(self), self.command, self.args, pretest,
-                    failtest, stat, self.code,
+                    donetest, stat, self.code,
                     True if self.out else False, True if self.err else False,
                     self.store)
 
@@ -580,7 +645,7 @@ class Step(object):
 
     class FailedTest(LoggingException):
 
-        """Failed during failtest."""
+        """Failed during test."""
 
         pass
 
@@ -604,7 +669,8 @@ class Function(Step):
     """
 
     def __init__(self, function, args=None, store=True, parent=None,
-                 failtest=None, pretest=None, name='unknown function'):
+                 donetest=None, pretest=None, name='unknown function',
+                 depends=None):
         """Build the function."""
         # Make sure function is callable
         if not hasattr(function, '__call__'):
@@ -616,8 +682,8 @@ class Function(Step):
         if args:
             if not isinstance(args, tuple):
                 args = (args,)
-        super(Function, self).__init__(function, args, store, parent, failtest,
-                                       pretest, name)
+        super(Function, self).__init__(function, args, store, parent, donetest,
+                                       pretest, name, depends)
 
     def run(self, kind=''):
         """Execute the function with the provided args.
@@ -653,9 +719,9 @@ class Function(Step):
             if self.parent:
                 self.parent.save()
 
-        # Run the failtest if available
-        if self.failtest:
-            self.run_fail_test()
+        # Run the donetest if available
+        if self.donetest:
+            self.run_done_test(fail_step_on_error=True, raise_on_fail=True)
         if kind == 'get':
             return self.out
 
@@ -665,7 +731,8 @@ class Command(Step):
     """A single external command as a pipeline step."""
 
     def __init__(self, command, args=None, store=True, parent=None,
-                 failtest=None, pretest=None, name='unknown command'):
+                 donetest=None, pretest=None, name='unknown command',
+                 depends=None):
         """Build the command."""
         logfile = parent.logfile if parent else sys.stderr
         # Make sure command exists if not a shell script
@@ -685,8 +752,8 @@ class Command(Step):
                                      logfile)
 
         # Initialize the whole object
-        super(Command, self).__init__(command, args, store, parent, failtest,
-                                      pretest, name)
+        super(Command, self).__init__(command, args, store, parent, donetest,
+                                      pretest, name, depends)
 
     def run(self, kind=''):
         """Run the command.
@@ -748,9 +815,9 @@ class Command(Step):
                 self.parent.save()
             raise self.CommandFailed(err, self.parent.logfile)
 
-        # Run the failtest if available
-        if self.failtest:
-            self.run_fail_test()
+        # Run the donetest if available
+        if self.donetest:
+            self.run_done_test(fail_step_on_error=True, raise_on_fail=True)
         if kind == 'get':
             return self.out
 
@@ -863,4 +930,33 @@ class FunctionError(LoggingException):
 
     """Function call failed."""
 
+    pass
+
+###############################################################################
+#             Test Functions Compatible with pretest and donetest             #
+###############################################################################
+
+
+def exists(file_list, kind=None):
+    """Wrapper for os.path.exists. Supports strings, tuples, lists or dicts.
+
+    :file_list: A file or directory that should exits. If this is a string,
+                list, or tuple, the search is agnostic to file or directory,
+                unless type is specified.
+                If a dictionary is provided, it must have the format:
+                    {'path_point': 'file', 'path_point': 'directory'}
+    :kind:      Either 'file' or 'directory'. Not used if file_list is dict.
+    :returns:   True on success, False on failure
+
+    """
+    pass
+
+
+def tail_match(file_list, match_string):
+    """Search the end of a file with tail for 'match_string'.
+
+    :file_list:    string, list, or tuple of file names to search
+    :match_string: string to match against
+    :returns:   True on success, False on failure
+    """
     pass
