@@ -8,7 +8,7 @@ Easily manage a complex pipeline with python.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 1.0.1
        CREATED: 2016-14-15 16:01
- Last modified: 2016-01-18 09:09
+ Last modified: 2016-01-21 11:58
 
    DESCRIPTION: Classes and functions to make running a pipeline easy
 
@@ -222,18 +222,25 @@ class Pipeline(object):
         self._get_current()
         self.save()
 
-    def run_all(self, force=False):
-        """Run all steps in order.
+    def run_all(self, skip_pre_donecheck=False, force=False):
+        """Run all steps in order if not already complete.
 
-        Skip already completed steps unless force is True, in which case
-        run all anyway
+        :skip_pre_donecheck: Do not run the donecheck at start. Otherwise
+                             donecheck is always run on every step (even
+                             completed) to determine if a re-run is needed.
+        :force:              Run every step, irrespective of state.
         """
         self._get_current()
         self.save()
-        for step in self.order:
-            if not force and self.steps[step].done:
+        for step in self:
+            # Get done state
+            done = step.done
+            if not skip_pre_donecheck and not force:
+                if step.donetest:
+                    done = step.run_done_test()
+            if not force and done:
                 continue
-            self.run(step)
+            step.run()
         self._get_current()
         self.save()
 
@@ -280,6 +287,45 @@ class Pipeline(object):
     def check_all(self, fail_on_error=False, raise_on_error=False):
         """Run check() (donetest) on every job and mark done if true."""
         pass  # TODO
+
+    ##########################
+    #  Print detailed stats  #
+    ##########################
+
+    def print_table(self, outfile=sys.stdout):
+        """Print detailed tab delim stats to outfile.
+
+        :outfile: File handle to write to
+        :returns: None, just prints.
+        """
+        outfile.write('Step\tCompleted\tFailed\tPretest\tDonetest\tCommand\t' +
+                      'Args\tOutput\tSTDERR\tCode\n')
+        for step in self:
+            if step.pretest:
+                pretest = 'Failed' if step.failed_pre else 'Passed'
+            else:
+                pretest = 'None'
+            if step.donetest:
+                donetest = 'Failed' if step.failed_done else 'Passed'
+            else:
+                donetest = 'None'
+            outfile.write('\t'.join(
+                [step.name, str(step.done), str(step.failed), pretest,
+                 donetest, str(step.command), str(step.args)]) + '\n')
+
+    def print_stats(self, outfile=sys.stdout, include_outputs=True):
+        """Pretty print detailed stats on pipeline to output.
+
+        :outfile:         File handle to write to
+        :include_outputs: Also print step.out and step.err
+        :returns:         None, just prints.
+        """
+        outfile.write(str(self) + '\n\n')
+        outfile.write('Individual step stats:\n\n')
+        for step in self:
+            outfile.write('\n' + str(step) + '\n')
+            if include_outputs:
+                outfile.write(step.get_outputs() + '\n')
 
     ###############
     #  Internals  #
@@ -561,6 +607,23 @@ class Step(object):
     #  Internals  #
     ###############
 
+    def get_runtime(self):
+        """Calculate the runtime and return as pretty string.
+
+        Format: Hours:Minutes:Seconds.Microseconds.
+        """
+        return str(dt.fromtimestamp(self.end_time) -
+                   dt.fromtimestamp(self.start_time))
+
+    def get_outputs(self):
+        """Return a formatted string containing self.out and self.err."""
+        output = ''
+        if self.out:
+            output = output + "\nOutput:\n{}".format(self.out)
+        if self.err:
+            output = output + "\nSTDERR:\n{}".format(self.err)
+        return output
+
     def _test_test(self, test):
         """Test a single test instance to make sure it is usable."""
         if isinstance(test, tuple):
@@ -583,9 +646,10 @@ class Step(object):
         """Display simple class info."""
         runmsg = 'Complete' if self.done else 'Not run'
         runmsg = 'Failed' if self.failed else runmsg
-        output = "{}, args: {} -- State: {}\n".format(self.command,
-                                                      self.args,
-                                                      runmsg.upper())
+        output = ("{:<11}{}\n{:<11}{}, Args: {}\n" +
+                  "{:<11}{}").format('Step:', self.name, 'Command:',
+                                      self.command, self.args,
+                                      'State:', runmsg.upper())
         if self.pretest:
             if self.failed_pre:
                 fmessage = '[FAILED]'
@@ -593,8 +657,8 @@ class Step(object):
                 fmessage = '[DONE]'
             else:
                 fmessage = ''
-            output = output + 'Pretest: {} {}\n'.format(self.pretest,
-                                                        fmessage)
+            output = output + '\nPretest: {:<11} {}'.format(self.pretest,
+                                                            fmessage)
         if self.donetest:
             if self.failed_done:
                 fmessage = '[FAILED]'
@@ -602,21 +666,22 @@ class Step(object):
                 fmessage = '[DONE]'
             else:
                 fmessage = ''
-            output = output + 'Donetest {} {}\n'.format(self.donetest,
-                                                        fmessage)
+            output = output + '\nDonetest: {:<11} {}'.format(self.donetest,
+                                                             fmessage)
 
         if self.done or self.failed:
-            timediff = str(dt.fromtimestamp(self.end_time) -
-                           dt.fromtimestamp(self.start_time))
-            output = output + "\n\n{0:<11}{1}\n".format(
+            timediff = self.get_runtime()
+            if self.code is not None:
+                output = output + "\n{0:<11}{1}".format('Exit code:',
+                                                        self.code)
+            output = output + "\n{0:<11}{1}".format(
                 'Ran on:',
                 time.ctime(self.start_time))
-            if self.code is not None:
-                output = output + "{0:<11}{1}\n".format('Exit code:',
-                                                        self.code)
-            output = output + "{0:<11}{1}".format('Runtime:', timediff)
-            if self.failed:
-                output = output + "\n\n\tWARNING --> Command Failed!"
+            output = output + "\n{0:<11}{1}".format('Runtime:', timediff)
+            output = output + "\n{0:<11}{1}".format(
+                'Output:', 'True' if self.out else 'False')
+            output = output + "\n{0:<11}{1}".format(
+                'STDERR:', 'True' if self.err else 'False')
         return output
 
     def __repr__(self):

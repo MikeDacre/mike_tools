@@ -61,7 +61,6 @@ def write_file(filename='foo', string='bar'):
 
 def check_file(filename='foo', string='bar'):
     """Check that a file contains a string."""
-    lg(str(filename) + str(string), level='critical')
     with open(filename) as fin:
         file_string = fin.read().rstrip()
     os.remove(filename)  # Clean up
@@ -145,9 +144,12 @@ def test_display():
     """Print all string objects from classes."""
     pip = get_pipeline()
     assert str(pip) == EXPECTED_OUTPUT
-    lg(str(pip), level=1)
-    for step in pip:
-        lg(str(step), level=0)
+    with open(LOGFILE, 'a') as fout:
+        lg('Table:', level='info')
+        pip.print_table(fout)
+    with open(LOGFILE, 'a') as fout:
+        lg('Stats:', level='info')
+        pip.print_stats(fout, False)
 
 
 def test_fail_add():
@@ -162,30 +164,30 @@ def test_fail_add():
         pip.run('john')
 
 
-def test_bad_failtest():
-    """Try to add a string as a failtest, expect failure."""
+def test_bad_donetest():
+    """Try to add a string as a donetest, expect failure."""
     pip = get_pipeline()
     with pytest.raises(pl.Step.StepError):
-        pip.add('ls', name='badfailtest', failtest='bob')
+        pip.add('ls', name='baddonetest', donetest='bob')
 
 
-def test_good_failtest():
-    """Submit a good function call and a tuple as failtests."""
+def test_good_donetest():
+    """Submit a good function call and a tuple as donetests."""
     pip = get_pipeline()
-    pip.add(write_file, name='write1', failtest=check_file)
-    pip.add(write_file, 'bob', name='write2', failtest=(check_file, 'bob'))
+    pip.add(write_file, name='write1', donetest=check_file)
+    pip.add(write_file, 'bob', name='write2', donetest=(check_file, 'bob'))
     pip['write1'].run()
     pip['write2'].run()
 
 
-def test_failing_failtest():
-    """Submit a failtest that will fail. Expect failure."""
+def test_failing_donetest():
+    """Submit a donetest that will fail. Expect failure."""
     pip = get_pipeline()
-    pip.add(write_file, ('fred', 'hi'), name='write3', failtest=(
+    pip.add(write_file, ('fred', 'hi'), name='write3', donetest=(
         check_file, ('fred', 'bob')))
     with pytest.raises(pl.Step.FailedTest):
         pip['write3'].run()
-    pip.add(write_file, ('joe', 'hi'), name='write4', failtest=(
+    pip.add(write_file, ('joe', 'hi'), name='write4', donetest=(
         check_file, ('joeseph', 'hi')))
     with pytest.raises(OSError):
         pip['write4'].run()
@@ -215,4 +217,4 @@ def test_failing_pretest():
 def test_remove_files():
     """Remove the pickle file."""
     os.remove(PIPELINE_FILE)
-    #  os.remove(PIPELINE_FILE + '.log')
+    os.remove(PIPELINE_FILE + '.log')
