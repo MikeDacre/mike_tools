@@ -10,7 +10,7 @@ MIN_LEVEL = 'info'
 
 pipeline_output = ''
 
-EXPECTED_OUTPUT="""Pipeline:
+EXPECTED_OUTPUT = """Pipeline:
 Step   Name               Status
 0      ls                 Done
 1      bob                Done
@@ -51,6 +51,16 @@ def remove_pipeline():
     """Delete pipeline file."""
     if os.path.exists(PIPELINE_FILE):
         os.remove(PIPELINE_FILE)
+
+
+def create_files():
+    """Create a list of files of the format 1.testfile."""
+    for i in range(1, 10):
+        os.system('touch {}.testfile'.format(i))
+
+def log_os(file):
+    """Run os.path.exists and log if fails."""
+    pass
 
 
 def write_file(filename='foo', string='bar'):
@@ -144,12 +154,6 @@ def test_display():
     """Print all string objects from classes."""
     pip = get_pipeline()
     assert str(pip) == EXPECTED_OUTPUT
-    with open(LOGFILE, 'a') as fout:
-        lg('Table:', level='info')
-        pip.print_table(fout)
-    with open(LOGFILE, 'a') as fout:
-        lg('Stats:', level='info')
-        pip.print_stats(fout, False)
 
 
 def test_fail_add():
@@ -212,6 +216,72 @@ def test_failing_pretest():
         pip['print2'].run()
     assert pip['print2'].done is False
     assert pip['print2'].failed_pre is True
+
+
+def test_failing_file_list():
+    """Create a bad file list, expect failure."""
+    with pytest.raises(pl.RegexError):
+        pl.build_file_list(r'*.txt')
+
+
+def test_good_file_list():
+    """Create a good file regex and test."""
+    assert os.path.exists('hi_4298') is False
+    os.mkdir('hi_4298')
+    here = os.path.abspath('.')
+    filelist = [os.path.join(here, 'hi_4298', '1.txt'),
+                os.path.join(here, 'hi_4298', '2.txt'),
+                os.path.join(here, 'hi_4298', '3.log')]
+    for file in filelist:
+        os.system('touch {}'.format(file))
+    filelist.pop()
+    assert pl.build_file_list(r'hi_4298/.*\.txt') == filelist
+    os.system('rm -rf hi_4298')
+
+
+def test_regex_step():
+    """Add a step with a regex."""
+    create_files()
+    pip = get_pipeline()
+    pip.add(os.path.exists, '<StepFile>', file_list=r'[0-9].testfile',
+            name='parallel_file')
+    pip.add(os.remove, '<StepFile>', file_list=r'[0-9].testfile',
+            name='parallel_delete')
+    assert isinstance(pip['parallel_file'].steps[0].parent, pl.Step)
+
+
+def test_parallel_step():
+    """Run a step in parallel."""
+    pip = get_pipeline()
+    pip['parallel_file'].run_parallel()
+    for step in pip['parallel_file'].steps:
+        assert step.done is True
+        assert step.failed is False
+
+
+def test_serial_step():
+    """Run a step in serial."""
+    pip = get_pipeline()
+    pip['parallel_delete'].run_all()
+    for step in pip['parallel_delete'].steps:
+        assert step.done is True
+        assert step.failed is False
+
+
+#  def test_sub_pipeline():
+    #  """Add and run a subpipeline."""
+    #  pip = get_pipeline()
+
+
+def test_print():
+    """Print outputs to logfile."""
+    pip = get_pipeline()
+    with open(LOGFILE, 'a') as fout:
+        lg('Table:', level='info')
+        pip.print_table(fout)
+    with open(LOGFILE, 'a') as fout:
+        lg('Stats:', level='info')
+        pip.print_stats(fout, False)
 
 
 def test_remove_files():
