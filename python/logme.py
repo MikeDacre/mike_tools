@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-01-17 17:11
+ Last modified: 2016-02-23 11:58
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -16,14 +16,23 @@ Logging with timestamps and optional log files.
                 using the also_write argument.
                 If level is 'error' or 'critical', error is written to
                 STDERR unless also_write == -1
-                'min_level' can also be provided, logs will only print if
-                min_level > level. Level order: critical>error>warn>info>debug
+                MIN_LEVEL can also be provided, logs will only print if
+                level > MIN_LEVEL. Level order: critical>error>warn>info>debug
 
          USAGE: import logme as lm
-                lm.log("Screw up!", <outfile>, level='warn'|'error'|'normal',
-                       also_write='stderr'|'stdout', min_level='error')
+                lm.log("Screw up!", <outfile>,
+                       level='debug'|'info'|'warn'|'error'|'normal',
+                       also_write='stderr'|'stdout')
 
                 All arguments are optional except for the initial message.
+      EXAMPLES: lm.log('Hi')
+                   Prints: 20160223 11:46:24.969 | INFO --> Hi
+                lm.log('Hi', level='debug')
+                   Prints nothing
+                lm.MIN_LEVEL = 'debug'
+                lm.log('Hi', level='debug')
+                   Prints: 20160223 11:46:24.969 | DEBUG --> Hi
+
 
           NOTE: Uses terminal colors and STDERR, not compatible with non-unix
                 systems
@@ -48,9 +57,11 @@ RED    = '\033[91m'
 BOLD   = '\033[1m'
 ENDC   = '\033[0m'
 
+MIN_LEVEL = 'info'
+
 
 def log(message, logfile=sys.stderr, level='info', also_write=None,
-        min_level='info', kind=None):
+        min_level=None, kind=None):
     """Print a string to logfile.
 
     :message: The message to print.
@@ -65,9 +76,8 @@ def log(message, logfile=sys.stderr, level='info', also_write=None,
     :also_write: 'stdout': print to STDOUT also.
     :also_write: 'stderr': print to STDERR also.
 
-    :min_level: The minimum print level, same flags as 'level', 'level' must be
-                greater than or equal to this to print. Ignored with logging
-                objects
+    :min_level: Retained for backwards compatibility, min_level should be set
+                using the logme.MIN_LEVEL constant.
 
     :kind: synonym for level, kept to retain backwards compatibility
     """
@@ -77,6 +87,8 @@ def log(message, logfile=sys.stderr, level='info', also_write=None,
 
     if kind:
         level = kind
+
+    min_level = min_level if min_level else MIN_LEVEL
 
     # Level checking, not used with logging objects
     level_map = {'debug': 0, 'info': 1, 'warn': 2, 'error': 3, 'critical': 4,
