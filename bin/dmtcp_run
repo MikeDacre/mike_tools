@@ -50,10 +50,10 @@ if [[ $restart == 1 ]]; then
   echo "Restarting with dmtcp" >&2
   dir=$1
   shift
-  mkdir -p $dir
 else
   echo "Running with dmtcp" >&2
   dir="dmtcp.${1}.$(date +'%d%H%M%S')"
+  mkdir -p $dir
 fi
 portfile="${dir}/port"
 
