@@ -1,0 +1,102 @@
+#!/bin/bash
+module load dmtcp
+
+#######################
+#  Command Line Args  #
+#######################
+
+usage_str='USAGE:
+  dmtcp_run script
+  dmtcp_run -r checkpoint_file
+
+OPTIONS:
+  -r :
+      Restart a previously running script from a checkpoint file.
+  --help:
+      Print this message and exit.'
+
+restart=0
+if [ $# -gt 0 ]; then
+  if [ $1 = "--help" ]; then
+    echo "$usage_str"
+    exit
+  elif [ $# -ge 1 ]; then
+    case "$1" in
+      -r)
+        restart=1
+        shift;;
+    esac
+  elif [ $1 = "--help" ]; then
+    echo "$usage_str"
+    exit
+  fi
+fi
+
+echo $restart
+
+#######################
+#  Start Coordinator  #
+#######################
+
+name="${1}.$(date +'%d%H%M%S')"
+
+echo "Starting coordinator"
+dmtcp_coordinator --daemon --exit-on-last -p 0 --port-file $name &>/dev/null
+port=`cat $name`
+dmtcp_command -p $port -s &>/dev/null
+if [[ $? != 0 ]]; then
+  echo Failed to start dmtcp_coordinator
+  exit 420
+fi
+echo Port: $port
+ 
+################
+# Trap signals #
+################
+
+trap_with_arg() {
+    func="$1" ; shift
+    for sig ; do
+        trap ' $func $sig ' $sig
+    done
+}
+
+save_and_exit() {
+  echo Trapped: $1
+  echo Saving
+  dmtcp_command -p $port -s
+  dmtcp_command -p $port -bc
+  code=$?
+  echo Quitting jobs
+  kill -INT $(jobs -p)
+  kill -- -$$
+  echo Quitting Coordinator
+  dmtcp_command -p $port -q &>/dev/null
+  if [[ $code == 0 ]]; then
+    echo "Saved state, exiting now."
+    exit 42
+  else
+    echo "Failed to save"
+    exit 24
+  fi
+}
+
+trap_with_arg save_and_exit HUP INT QUIT TERM
+ 
+#################
+#  Run process  #
+#################
+ 
+if [[ $restart == 1 ]]; then
+  dmtcp_restart -p $port --ckpt-open-files $@ &
+  child=$!
+else
+  dmtcp_launch -p $port --no-gzip --ckpt-open-files $@ &
+  child=$!
+fi
+
+#####################
+#  Wait for Signal  #
+#####################
+
+wait "$child"
