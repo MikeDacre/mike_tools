@@ -6,14 +6,21 @@ module load dmtcp
 #######################
 
 usage_str='USAGE:
-  dmtcp_run script
-  dmtcp_run -r checkpoint_file
+  dmtcp_run [DMTCP_LAUNCH OPTIONS] script
+  dmtcp_run -r checkpoint_dir [DMTCP_RESTART OPTIONS]
 
 OPTIONS:
   -r :
-      Restart a previously running script from a checkpoint file.
+      Restart a previously running script from a checkpoint file
+      or files.
   --help:
-      Print this message and exit.'
+      Print this message and exit.
+
+DMTCP_LAUNCH OPTIONS:
+  Any options that can be passed to dmtcp_launch.
+  
+DMTCP_RESTART OPTIONS:
+  Any options that can be passed to dmtcp_restart.'
 
 restart=0
 if [ $# -gt 0 ]; then
@@ -30,25 +37,35 @@ if [ $# -gt 0 ]; then
     echo "$usage_str"
     exit
   fi
+else
+  echo "$usage_str"
+  exit
 fi
-
-echo $restart
 
 #######################
 #  Start Coordinator  #
 #######################
 
-name="${1}.$(date +'%d%H%M%S')"
+if [[ $restart == 1 ]]; then
+  echo "Restarting with dmtcp" >&2
+  dir=$1
+  shift
+  mkdir -p $dir
+else
+  echo "Running with dmtcp" >&2
+  dir="dmtcp.${1}.$(date +'%d%H%M%S')"
+fi
+portfile="${dir}/port"
 
-echo "Starting coordinator"
-dmtcp_coordinator --daemon --exit-on-last -p 0 --port-file $name &>/dev/null
-port=`cat $name`
+dmtcp_coordinator --ckptdir $dir --daemon --exit-on-last -p 0 --port-file $portfile &>/dev/null
+port=`cat $portfile`
 dmtcp_command -p $port -s &>/dev/null
 if [[ $? != 0 ]]; then
-  echo Failed to start dmtcp_coordinator
+  echo "Failed to start dmtcp_coordinator." >&2
   exit 420
 fi
-echo Port: $port
+echo "Checkpoint Dir: $dir" >&2
+echo "Port: $port" >&2
  
 ################
 # Trap signals #
@@ -62,36 +79,39 @@ trap_with_arg() {
 }
 
 save_and_exit() {
-  echo Trapped: $1
-  echo Saving
-  dmtcp_command -p $port -s
+  echo "Caught: $1" >&2
+  echo "Saving..." >&2
+  # dmtcp_command -p $port -s
   dmtcp_command -p $port -bc
   code=$?
-  echo Quitting jobs
   kill -INT $(jobs -p)
   kill -- -$$
-  echo Quitting Coordinator
-  dmtcp_command -p $port -q &>/dev/null
   if [[ $code == 0 ]]; then
-    echo "Saved state, exiting now."
+    echo "Saved complete, exiting now" >&2
     exit 42
   else
-    echo "Failed to save"
+    echo "Failed to save" >&2
     exit 24
   fi
 }
 
-trap_with_arg save_and_exit HUP INT QUIT TERM
+cleanup() {
+  dmtcp_command -p $port -q &>/dev/null
+  exit
+}
+
+trap_with_arg save_and_exit USR1 HUP INT QUIT TERM
+trap ' cleanup ' EXIT
  
 #################
 #  Run process  #
 #################
  
 if [[ $restart == 1 ]]; then
-  dmtcp_restart -p $port --ckpt-open-files $@ &
+  $dir/dmtcp_restart_script.sh -p $port --ckptdir $dir $@ &
   child=$!
 else
-  dmtcp_launch -p $port --no-gzip --ckpt-open-files $@ &
+  dmtcp_launch -p $port --ckptdir $dir --no-gzip --ckpt-open-files $@ &
   child=$!
 fi
 
