@@ -8,7 +8,7 @@ Compare all SNPs to the equivalent position in a genome file.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-15-13 18:01
- Last modified: 2016-01-15 11:51
+ Last modified: 2016-03-01 14:24
 
    DESCRIPTION: Take a SNP file in either Bed or VCF format and create a
                 list of Chromsome objects, which contain all of the SNPs.
@@ -76,7 +76,8 @@ class Chromosome(object):
             chromosome must be a Bio.SeqIO object created from
             the same chromosome as this object
         """
-        chr_id = chromosome.id
+        #  chr_id = chromosome.id
+        chr_id = chromosome.id.rstrip('_maternal').rstrip('_paternal')
         chr_id = chr_id[3:] if chr_id.startswith('chr') else chr_id
         try:
             assert str(chr_id) == str(self.number)
@@ -157,7 +158,8 @@ def comp_snps_to_chr(snps, genome):
     for seq_obj in genome:
         for chromosome in seq_obj:
             try:
-                snps[names[chromosome.id.lstrip('chr_')]].get_lists(chromosome)
+                #  snps[names[chromosome.id.lstrip('chr_')]].get_lists(chromosome)
+                snps[names[chromosome.id.lstrip('chr_').rstrip('_maternal').rstrip('_paternal')]].get_lists(chromosome)
             except KeyError:
                 sys.stderr.write(('\nChromsome {0} is not in snp list, ' +
                                   'skipping.\nsnp list contains the ' +

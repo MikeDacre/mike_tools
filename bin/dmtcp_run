@@ -108,10 +108,10 @@ trap ' cleanup ' EXIT
 #################
  
 if [[ $restart == 1 ]]; then
-  $dir/dmtcp_restart_script.sh -p $port --ckptdir $dir $@ &
+  exec $dir/dmtcp_restart_script.sh -p $port --ckptdir $dir $@ &
   child=$!
 else
-  dmtcp_launch -p $port --ckptdir $dir --no-gzip --ckpt-open-files $@ &
+  exec dmtcp_launch -p $port --ckptdir $dir --no-gzip --ckpt-open-files "$@" &
   child=$!
 fi
 
