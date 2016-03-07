@@ -57,3 +57,43 @@ Options
                             Log File, Default STDERR
       -v, --verbose         Verbose logging.
 
+
+Remove Ambiguous FastQ Records
+==============================
+
+Take single or paired end fastq files, gzipped or not, and filter out all reads
+containing an 'N'. Leaves the original file intact.
+
+Options
+-------
+
+    usage: remove_ambiguous_fq_records.py [-1 <pair1> -2 <pair2>] [single_end]
+
+    Remove any reads with an 'N' character from both pairs.
+
+    ============================================================================
+
+            AUTHOR: Michael D Dacre, mike.dacre@gmail.com
+      ORGANIZATION: Stanford University
+          LICENSE: MIT License, property of Stanford, use as you wish
+          VERSION: 0.1
+          CREATED: 2016-06-01 16:03
+    Last modified: 2016-03-02 12:28
+
+      DESCRIPTION: Outputs paired end files in matched order.
+                   Can provide either single end or paired end (not both).
+                   Output files are the input file name + 'filtered'. e.g.::
+                      Input:  -1 in.1.fq.gz -2 in.2.fq.gz
+                      Output: in.1.filtered.fq.gz & in.2.filtered.fq.gz
+
+    ============================================================================
+
+    optional arguments:
+      -h, --help        show this help message and exit
+      -d, --decompress  Output a decomressed file even if input is compressed
+
+    FastQ files:
+      single_end        Input files
+      -1 PAIR1          Paired end file 1
+      -2 PAIR2          Paired end file 1
+
