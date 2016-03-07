@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-02-23 11:58
+ Last modified: 2016-03-03 13:36
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -58,9 +58,10 @@ BOLD   = '\033[1m'
 ENDC   = '\033[0m'
 
 MIN_LEVEL = 'info'
+LOGFILE   = sys.stderr
 
 
-def log(message, logfile=sys.stderr, level='info', also_write=None,
+def log(message, level='info', logfile=None, also_write=None,
         min_level=None, kind=None):
     """Print a string to logfile.
 
@@ -84,6 +85,9 @@ def log(message, logfile=sys.stderr, level='info', also_write=None,
     stdout = False
     stderr = False
     message = str(message)
+
+    if not logfile:
+        logfile = LOGFILE
 
     if kind:
         level = kind
