@@ -4,10 +4,10 @@ Python libraries not worthy of their own module
 manhattan_plot
 --------------
 
-Plot a dictionary of points + p-values as a manhattan plot, e.g.:
+Plot a dictionary of points + p-values as a manhattan plot, e.g.::
 
-  import manhattan_plot
-  manhattan_plot.plot(dict, sig_line=0.05, title='GWAS')
+    import manhattan_plot
+    manhattan_plot.plot(dict, sig_line=0.05, title='GWAS')
 
 Many thanks to [Brent Pedersen](https://github.com/brentp) for the [original script](https://github.com/brentp/bio-playground/blob/master/plots/manhattan-plot.py). This version is just a modification of that code to allow running as a module and easy python2/3 functionality.
 
@@ -58,7 +58,7 @@ A simple function to print a log with a timestamp. Also provides an exception cl
 Use examples:
 
     from logme import log
-    LOG_LEVEL = 'warn'
+    log.MIN_LEVEL = 'warn'
     log('This won't be printed', level='info', min_level=LOG_LEVEL)
   
 No output
@@ -75,6 +75,24 @@ Any filehandle can be used instead of 'mylog.txt', if no file is provided, STDER
     ----------------------------------> This is another line
 
 A logging object can also be used, in which can only the timestamp will be added, and newlines will not be indented.
+
+Memory Profile
+--------------
+Simple script to profile memory of a program. Usage::
+
+    import memory_profile
+    print(memory_profile.memory())
+
+This script is not written originally by me, but I can't remember where I got it from. If anyone can figure that out, please tell me and I will update the attribution.
+
+
+Compare Snps to Genome
+----------------------
+Take a SNP file in either Bed or VCF format and create a list of Chromsome objects, which contain all of the SNPs.
+Then parse a list of FastA files and create a list of SeqIO objects.
+Finally, compare all SNPs to the equivalent position in the SeqIO objects, and create three lists to describe matches:
+    ref, alt, and no match
+These lists are added to the Chromosome object and contain the positions of the SNPs that they describe.
 
 mike.py
 -------
