@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-03-03 13:36
+ Last modified: 2016-03-11 14:44
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -45,7 +45,7 @@ import bz2
 import logging
 from datetime import datetime as dt
 
-__all__ = ['log']
+__all__ = ['log', 'MIN_LEVEL', 'LOGFILE']
 
 ###################################
 #  Constants for printing colors  #
