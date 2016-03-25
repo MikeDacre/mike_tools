@@ -12,7 +12,7 @@ Run the entire WASP pipeline with either tophat or STAR.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.2
        CREATED: 2016-07-12 09:02
- Last modified: 2016-03-07 11:27
+ Last modified: 2016-03-24 14:15
 
 ============================================================================
 """
@@ -24,44 +24,9 @@ import pickle
 import logme
 
 MAX_JOBS  = 2000
-PARTITION = 'owners'
+PARTITION = 'hbfraser'
 logme.MIN_LEVEL = 'info'  # Change to debug for verbose logging
 logme.LOGFILE   = 'wasp_submit_log.log'
-
-
-def make_job_file(job, name, time, cores, mem=None, modules=[]):
-    """Make a job file with 'job'."""
-    modules = [modules] if isinstance(modules, str) else modules
-    curdir = os.path.abspath('.')
-    print(name)
-    scrpt = os.path.join(curdir, '{}.sbatch'.format(name))
-    with open(scrpt, 'w') as outfile:
-        outfile.write('#!/bin/bash\n')
-        outfile.write('#SBATCH -p {}\n'.format(PARTITION))
-        outfile.write('#SBATCH --ntasks 1\n')
-        outfile.write('#SBATCH --cpus-per-task {}\n'.format(cores))
-        outfile.write('#SBATCH --time={}\n'.format(time))
-        if mem:
-            outfile.write('#SBATCH --mem={}\n'.format(mem))
-        outfile.write('#SBATCH -o {}.o.%j\n'.format(name))
-        outfile.write('#SBATCH -e {}.e.%j\n'.format(name))
-        outfile.write('cd {}\n'.format(curdir))
-        outfile.write('srun bash {}.script\n'.format(
-            os.path.join(curdir, name)))
-    with open(name + '.script', 'w') as outfile:
-        outfile.write('#!/bin/bash\n')
-        outfile.write('echo "SLURM_JOBID="$SLURM_JOBID\n')
-        outfile.write('echo "SLURM_JOB_NODELIST"=$SLURM_JOB_NODELIST\n')
-        outfile.write('echo "SLURM_NNODES"=$SLURM_NNODES\n')
-        outfile.write('echo "SLURMTMPDIR="$SLURMTMPDIR\n')
-        outfile.write('echo "working directory = "$SLURM_SUBMIT_DIR\n')
-        for module in modules:
-            outfile.write('module load {}\n'.format(module))
-        outfile.write('cd {}\n'.format(curdir))
-        outfile.write('mkdir -p $LOCAL_SCRATCH\n')
-        outfile.write('echo "Running {}"\n'.format(name))
-        outfile.write(job + '\n')
-    return scrpt
 
 
 def run_mapping(name, infiles, genome, algorithm='STAR', gtf=None,
@@ -103,7 +68,8 @@ def run_mapping(name, infiles, genome, algorithm='STAR', gtf=None,
                     '--outFileNamePrefix {} '.format(name) +
                     '--outSAMtype BAM SortedByCoordinate ' +
                     '--outSAMattributes MD NH ' +
-                    '--clip5pNbases 6')
+                    '--clip5pNbases 6 ' +
+                    '--limitBAMsortRAM 31518962612')
 
         if zipped:
             for fl in new_list:
@@ -127,11 +93,9 @@ def run_mapping(name, infiles, genome, algorithm='STAR', gtf=None,
     else:
         raise Exception('Invalid algorithm: {}'.format(algorithm))
 
-    return (slurmy.monitor_submit(make_job_file(command, name,
-                                                '24:00:00', 16,
-                                                modules=modules),
-                                  dependency, MAX_JOBS),
-            outbam)
+    return (slurmy.monitor_submit(slurmy.make_job_file(
+        command, name, '24:00:00', 16, partition=PARTITION, modules=modules),
+        dependency, MAX_JOBS), outbam)
 
 
 def wasp_step_1(fl, snp_dir, pipeline=None, dependency=None):
@@ -147,10 +111,10 @@ def wasp_step_1(fl, snp_dir, pipeline=None, dependency=None):
                            'find_intersecting_snps.py') \
         if pipeline else 'find_intersecting_snps.py'
     logme.log('Submitting wasp step 1 for {}'.format(fl), level='debug')
-    return slurmy.monitor_submit(make_job_file(
+    return slurmy.monitor_submit(slurmy.make_job_file(
         'python2 {} -m 1000000 {} {}'.format(command, fl, snp_dir),
-        fl + '_step1', '06:00:00', 4, '20000', modules=['python/2.7.5']),
-        dependency, MAX_JOBS)
+        fl + '_step1', '16:00:00', 8, '30000', partition=PARTITION,
+        modules=['python/2.7.5']), dependency, MAX_JOBS)
 
 
 def wasp_step_2(name, remapped, pipeline=None, dependency=None):
@@ -171,13 +135,13 @@ def wasp_step_2(name, remapped, pipeline=None, dependency=None):
     shortname = '.'.join(name.split('.')[:-1]) if name.endswith('.bam') \
         or name.endswith('.sam') else name
     logme.log('Submitting wasp step 2 for {}'.format(shortname), level='debug')
-    return slurmy.monitor_submit(make_job_file(
+    return slurmy.monitor_submit(slurmy.make_job_file(
         'python2 {} {} {} {} {}'.format(command,
                                         shortname + '.to.remap.bam',
                                         remapped,
                                         shortname + '.remap.keep.bam',
                                         shortname + '.to.remap.num.gz'),
-        shortname + '_step2', '16:00:00', 4, '20000',
+        shortname + '_step2', '16:00:00', 8, '30000', partition=PARTITION,
         modules=['python/2.7.5']), dependency, MAX_JOBS)
 
 
@@ -189,11 +153,11 @@ def merge_bams(name, dependency=None):
     remapped   = shortname + '.remap.keep.bam'
     uname      = shortname + '_wasp_final_unsorted.bam'
     final_name = shortname + '_wasp_final.bam'
-    return slurmy.monitor_submit(make_job_file(
+    return slurmy.monitor_submit(slurmy.make_job_file(
         'samtools merge -f {} {} {}\n'.format(uname, orig_reads, remapped) +
         'samtools sort -o {} {}'.format(final_name, uname),
-        shortname + '_merge', '12:00:00', 1, '16000', 'samtools'),
-        dependency, MAX_JOBS)
+        shortname + '_merge', '16:00:00', 4, '26000', partition=PARTITION,
+        modules='samtools'), dependency, MAX_JOBS)
 
 
 def run_wasp(files, snp_dir, genome, algorithm='star', gtf=None, pipeline=None,
