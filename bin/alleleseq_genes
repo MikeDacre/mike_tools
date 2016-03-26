@@ -1,0 +1,711 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Combine AlleleSeq counts across genes.
+
+============================================================================
+
+        AUTHOR: Michael D Dacre, mike.dacre@gmail.com
+  ORGANIZATION: Stanford University
+       LICENSE: MIT License, property of Stanford, use as you wish
+       VERSION: 0.1
+       CREATED: 2016-03-25 12:03
+ Last modified: 2016-03-25 20:43
+
+          IDEA: AlleleSeq counts alleles and assigns them to mat or pat
+                and then counts alleles in all individuals for each SNP.
+                However, what we want is the counts (maternal or paternal)
+                for all SNPs in a gene. To replicate AlleleSeq's functionality
+                we want to do the exact same binomial test for p-value for
+                the gene level counts as AlleleSeq's CombineSnpCounts.py
+                script does for SNP level counts.
+
+                We also want to be able to filter the results by FDR, using
+                the exact same algorithm used in AlleleSeq. To do that, we
+                take the contents of FalsePos.py and modify them the work
+                on our data, essentially we just iterate over genes instead
+                of over SNPs.
+
+                In addition, we want to be able to add additional gene level
+                information to the final output.
+
+   DESCRIPTION: This script has two modes, individual or combined. In combined
+                mode, CombineSnpCounts.py should be run first and only one
+                counts.txt file provided.
+
+                In individual mode, every individual will have their own
+                column. This is the default. In this mode, a list of .cnt
+                files from the AlleleSeq pipeline must be provided.
+
+                A GTF of gene locations must also be provided, and will be
+                used to sum counts across genes.
+
+                Output is handled by pandas.
+
+          NOTE: Currently only works on PHASED snps.
+
+============================================================================
+"""
+# Command line parsing and printing
+import sys
+import argparse
+from textwrap import dedent
+
+# File parsing
+import re
+from collections import defaultdict
+
+# Handle python objects
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+
+# Math and calculations
+import math
+import bisect
+import random
+import numpy
+import scipy.stats
+
+# Allow multiprocessing
+from multiprocessing import Pool
+
+# Original notes in FalsePos.py
+FDR_INFO = ''' Some notes on what is going on here.
+Basically, we want to use simulation to explicitly calculate a FDR for binomial tests on unbalanced alleles.  We use
+a binomial pvalue test to determine whether the ratio of alleles departs significantly from what would be expected
+from a fair coin toss.
+
+However, since the number of trials varies a lot from one test to another, it seems best to use an explicit method.
+
+Imagine that you want a particular overall FDR, say 0.1, for the entire dataset.  Then, what pvalue threshhold would correspond to that?
+
+say we have n trials, where the number of coin flips in a trial varies, and is given by cnt(i)
+
+FDR = Nsim/Nact, where:
+
+Nsim = sum( indicator(test(i) < pval)) over i.  This is the number of trials of the fair coin that had a "surprising" outcome, i.e.
+were further in the tail than the pval threshold.  In a perfect, non-discrete world, Nsim/n would equal pval, but the whole point of this
+exercise is that in the discrete, imperfect world it doesnt.
+
+Nact = the number of actual datapoints observed to have a binomial probability less than pval.
+
+So, for a given pval, say 0.05, we can calculate the FDR, which will be larger.  The first output from this code consists of a nice sampling of
+example pvals and their corresponding FDR.  We are interested in the reverse of this, i.e. having picked an FDR, we want the pval that would best give us
+this FDR.
+
+Thats the point of the second part of the output.  Starting from the largest pval, we work our way down, calculating FDR for each test,
+until FDR falls below our target.
+
+Note that FDR is NOT monotonically decreasing as we do this. Its true that both Nsim and Nact decrease.  However, Nact is strictly decreasing, but Nsim can hold steady, which results in temporarily increasing FDR over that interval.
+
+Also note that we do multiple simulations and use the mean of the Nsim values, in order to smooth out the results.
+
+'''
+
+###############################################################################
+#             AlleleSeq's Bionomial Test Functions from binom.py              #
+###############################################################################
+
+
+def binomtest(x, n, p):
+    """Run a binomial test with scipy unless n*p>50, then use normal_approx."""
+    #return (scipy.stats.binom_test(x, n, p), normal_approx(x, n, p))
+    if n*p > 50:
+        return normal_approx(x, n, p)
+    else:
+        return scipy.stats.binom_test(x, n, p)
+
+
+def normal_approx(x, n, p):
+    """A different implementation of the binomial test?."""
+    if abs(x-n*p) < 1e-5:
+        return 1.0
+    u=p*n
+    s=math.sqrt(n*p*(1-p))
+    norm=scipy.stats.distributions.norm(u,s)
+    if x<n*p:
+        pval=2*norm.cdf(x+.5) # add 0.5 for continuity correction
+    else:
+        pval=2*(1-norm.cdf(x-.5))
+    return pval
+
+
+###############################################################################
+#                AlleleSeq's FDR calculations from FalsePos.py                #
+###############################################################################
+
+
+class binomMemo(object):
+
+    """Do a binomial test with a definied range."""
+
+    def __init__(self, n):
+        """Create a binomial range."""
+        self.n=n
+        self.cache=[[binomtest(j, i, 0.5) for j in range(i+1)] for i in range(n)]
+    def binomtest(self, a, cnt):
+        """Do a binomial test."""
+        if cnt<self.n:
+            return self.cache[cnt][a]
+        else:
+            return binomtest(a, cnt, 0.5)
+
+
+def simpval(cnt,bm):
+    """Simulate a binomial pvalue from cnt."""
+    a=sum([random.randint(0,1) for i in range(cnt)])
+    pval=bm.binomtest(a, cnt)
+    return pval
+
+
+def simpval2(cnt,bm):
+    """Simulate a binomial pvalue from cnt."""
+    a=sum([random.randint(0,1) for i in range(cnt)])
+    #  pval=bm.binomtest(a, cnt)
+    return a
+
+
+def calc_fdr(pvals, target=0.1, sims=5, verbose=False):
+    """Return the highest pvalue that beats an FDR of 'target'.
+
+    I have kept most of the bloat from the original algorithm, and only removed
+    lines that had to be removed, all of these were just file handling lines.
+
+    :pvals:   A tuple of (mat_count, pat_count, p-value). Used to simulate new
+              pvalue set.
+    :target:  The FDR cutoff to beat.
+    :sims:    The number of simulations to do when calulating the random set of
+              pvalues.
+    :verbose: Print extra information.
+    """
+    bestFDR=bestPV=None
+
+    random.seed(0)  # This is set in the original algorithm
+
+    #  print "#"," ".join(sys.argv)
+    #  print "pval\tP\tFP\tFDR"
+    bm=binomMemo(60)
+    #  h=getInterestingHetsAnnotations.Handler(ifile, hasHeader=True)
+    #  n=h.getCount()  # Returns the number of lines in the file
+    #  g=h.getAllAnnotationsGenerator();  # All this returns is the infile as {chr => {pos => rest of the file as a tuple}}
+
+    n = len(pvals)
+
+    act_pvals=numpy.zeros(n) # pval as reported in counts file
+    cnt_sums=numpy.zeros(n, dtype=numpy.int)  # sum of major and minor alleles
+
+    # for each hetSNP, get the count of major and minor allele from the input file
+    for i, t in enumerate(pvals):
+        mat, pat, pval = t
+        act_pvals[i] = float(pval)  # Append p-value to the array
+        counts = [mat, pat]  # Create a list of counts
+        counts = [int(e) for e in counts] # Make them integers
+        counts = sorted(counts, reverse=True)[0:2] # Keep only the top two
+        cnt_sums[i] = sum(counts)  # Sum the top two counts
+
+    act_pvals = sorted(pvals)
+    # For every line in the input file, calculate a random pvalue. Repeat this
+    # sims times. Sims is often 5.
+    sim_pvals=numpy.array([ sorted([simpval(cnt_sums[j],bm) for j in range(n)]) for i in range(sims)])
+    #sim_pvals_means=numpy.mean(sim_pvals, 0)
+
+    pvs=[e*0.001 for e in range(10)]+[e*0.01 for e in range(1,10)]+[e*0.1 for e in range(1,10)]
+    # for a given test pv, find the number of actual pvals that are smaller, and the number of sim pvals that are smaller.
+    # FDR is the ratio
+    for pv in pvs:
+        # Get what position the pvalue from pvs is in in the actual pvalues
+        # from the input file.
+        Nact=bisect.bisect(act_pvals, pv)
+        # For every simulated pvalue set, find the position of the pvalue from
+        # pvs in that set, then take the mean of all simulations.
+        mean_Nsims=numpy.mean([bisect.bisect(sim_pvals[i], pv) for i in range(sims)])
+        # The false discovery rate is the position of the pvalue from pvs in
+        # the simulated pvalue set divided by the position of the same pvalue
+        # in the actual pvalue set from the infile, plus 1.
+        FDR=mean_Nsims/(Nact+1)
+        sys.stderr.write("%f\t%s\t%f\t%f\n" % (pv, Nact, mean_Nsims, FDR))
+
+    # This is my attempt to find the act_pval that corresponds best to the desired target FDR.
+    # This version walks from largest observed pvalue to the smallest.
+    if target:
+        last_FDR=last_pv=0.0
+        for Nact, pv in sorted(enumerate(act_pvals), reverse=True):
+            # For every simulated pvalue set, find the position of the pvalue from
+            # the actual pvalues in the simulated pvalues, then take the mean
+            # of all simulations.
+            mean_Nsims=numpy.mean([bisect.bisect(sim_pvals[i], pv) for i in range(sims)])
+            # The false discovery rate is the position of the pvalue from the
+            # actual data in the simulated pvalue set divided by the position
+            # we are in the list of pvalues (walking from largest to smallest)
+            FDR=mean_Nsims/(Nact+1)
+            if verbose: sys.stderr.write("test %d %f %f %f\n" % (Nact,mean_Nsims,FDR, pv))
+            # As soon as we get an FDR that is less than the target (usually
+            # 0.1), that is our 'bestFDR': the largest p-value that beats our
+            # target FDR.
+            if not bestFDR and FDR < target:
+                sys.stderr.write("target %f\n" % target)
+                sys.stderr.write("before %f %f\n" % (last_FDR, last_pv))
+                sys.stderr.write("after  %f %f\n" % (FDR, pv))
+                bestFDR = FDR; bestPV = pv
+
+            last_FDR=FDR; last_pv=pv
+
+        sys.stderr.write("Target %f FDR %f pv %f\n" % (target,bestFDR, bestPV))
+
+        return bestFDR
+
+
+###############################################################################
+#                        Primary Functions and Classes                        #
+###############################################################################
+
+#################################################
+#  Classes to hold exon information for lookup  #
+#################################################
+
+
+class Chrom(list):
+
+    """A list of genes on one chromosome."""
+
+    def find(self, loc):
+        """Search in every gene range."""
+        loc = int(loc)
+        for exon in self:
+            if exon.find(loc):
+                return exon.gene
+        return None
+
+    def __repr__(self):
+        """Print a list of genes."""
+        astr = []
+        for gene in self:
+            astr += [repr(gene)]
+        return '; '.join(astr)
+
+
+class Exon(object):
+
+    """A single exon, gene points to a Gene object."""
+
+    def __init__(self, gene, start, end, strand):
+        """Create an Exon, gene must be an existing Gene object."""
+        self.start  = int(start)
+        self.end    = int(end)
+        self.strand = strand
+
+        assert isinstance(gene, Gene)
+        self.gene   = gene
+
+    def find(self, loc, strand=None):
+        """Return True if loc in self. If strand provided, check that."""
+        if strand and not strand == self.strand:
+            return False
+        return self.start <= loc < self.end
+
+    def __repr__(self):
+        return "{}({}:{})".format(self.gene.name, self.start, self.end)
+
+
+##########################################
+#  Class to hold Genes and their counts  #
+##########################################
+
+
+class Gene(object):
+
+    """A single gene, holds counts."""
+
+    mat_counts   = 0
+    pat_counts   = 0
+    other_counts = 0
+
+    def __init__(self, name, trans_id=''):
+        """Create an empty Gene object."""
+        self.name     = name
+        self.trans_id = trans_id
+
+    def add_mat(self, count):
+        """Add maternal counts."""
+        self.mat_counts += count
+
+    def add_pat(self, count):
+        """Add paternal counts."""
+        self.pat_counts += count
+
+    def add_other(self, count):
+        """Add counts that are neither maternal or paternal.
+
+        These generally shouldn't occur, and checking them is valuable.
+        """
+        self.other_counts += count
+
+    def reset(self):
+        """Reset all counts to 0."""
+        self.mat_counts   = 0
+        self.pat_counts   = 0
+        self.other_counts = 0
+
+    def __repr__(self):
+        return "{}(mat:{};pat:{};other:{})".format(self.name,
+                                                   self.mat_counts,
+                                                   self.pat_counts,
+                                                   self.other_counts)
+
+
+###############################
+#  Class to hold SNP alleles  #
+###############################
+
+
+class SNP(object):
+
+    """A SNP which just holds mat and pat genotypes."""
+
+    def __init__(self, mat, pat, exon):
+        """Create a SNP object.
+
+        :mat: The maternal allele
+        :pat: The paternal allele
+
+        """
+        allowed_bases = ['A', 'T', 'G', 'C']
+        if mat.upper() in allowed_bases:
+            self.mat = mat
+        else:
+            raise Exception('SNP base not allowed')
+        if pat.upper() in allowed_bases:
+            self.pat = pat
+        else:
+            raise Exception('SNP base not allowed')
+        assert isinstance(exon, Exon)
+        self.exon = exon
+
+
+#############################
+#  House Keeping Functions  #
+#############################
+
+
+def num_to_chrom(chrom):
+    """Return a chromsome in the format chr# even if is number."""
+    return chrom if chrom.startswith('chr') else chrom[3:]
+
+
+##################
+#  File Parsing  #
+##################
+
+
+def parse_snp_file(snp_file, exons):
+    """Return a dictionary of SNP objects: {'chr'=>'pos'=>SNP}
+
+    Forces chromsome to be in format chr#.
+
+    :exons: The must be the output of the parse_gtf function.
+            It is used to assign an exon to every SNP.
+
+    """
+    total = 0
+    not_in_exon = 0
+    snp_dict = {}
+    with open(snp_file) as fin:
+        for line in fin:
+            total += 1
+            f = line.split('\t')  # No need to strip the newline off
+            chrom = num_to_chrom(f[0])  # Make sure chrom is right format
+            loc   = int(f[1])
+            exon  = exons[chrom].find(loc)  # Lookup exon this SNP is in
+            if not exon:
+                not_in_exon += 1
+                continue  # Skip all SNPs that aren't in exons.
+
+            # Add the SNP to the dictionary
+            if chrom not in snp_dict:
+                snp_dict[chrom] = {}
+            mat, pat = f[5]  # Split child genotype into two parent alleles.
+            snp_dict[chrom][loc] = SNP(mat, pat, exon)
+    sys.stderr.write('{} SNPs of {} not in exons.\n'.format(not_in_exon,
+                                                            total))
+    return snp_dict
+
+
+def parse_gtf(gtf_file):
+    """Return a defaultdict of Chrom objects for lookup.
+
+    To lookup, just run exons[chromsome].find(location) (where exons is the
+    defaultdict returned by this function).
+
+    :returns: defaultdict(exons), dict(genes)
+    """
+    # Initialize the list exons for lookup
+    exons = defaultdict(Chrom)
+
+    # Initialize a dictionary of genes
+    genes = {}
+
+    # Build regexes
+    gene_id  = re.compile(r'gene_id "([^"]+)"')
+    trans_id = re.compile(r'transcript_id "([^"]+)"')
+
+    with open(gtf_file) as fin:
+        for line in fin:
+            fields = line.rstrip().split('\t')
+            if not fields[2] == 'exon':
+                continue
+            chrom  = num_to_chrom(fields[0])
+            start  = int(fields[3])
+            end    = int(fields[4])
+            strand = fields[6]
+            gene   = gene_id.findall(fields[8])[0]
+            trans  = trans_id.findall(fields[8])[0]
+            if gene not in genes:
+                genes[gene] = Gene(gene, trans)
+            exon = Exon(genes[gene], start, end, strand)
+            exons[chrom].append(exon)
+
+    return exons, genes
+
+
+######################
+#  Primary function  #
+######################
+
+
+def get_gene_counts(snps, exons, genes, count_file):
+    """Assign gene level counts to all SNPs in count_files.
+
+    :snps:       The snps dictionary from parse_snp_file()
+    :exons:      The exons object from parse_gtf()
+    :genes:      The genes object from parse_gtf()
+    :count_file: A single count file from AlleleSeq
+    :returns:    A copy of genes with only genes for this individual
+
+    """
+    # Initialize snp counters
+    total       = 0
+    not_in_gene = 0
+
+    sys.stderr.write('snps keys: {}\n'.format(snps.keys()))
+    with open(count_file, 'rb') as fin:
+        # This is a dict: {'chr'=>{int('loc')=>{'a':#,'c':#,'g':#,'t':#}}}
+        ind_counts = pickle.load(fin)
+        for chrom, locs in ind_counts.items():
+            for loc in locs.items():
+                total += 1
+                chrom = num_to_chrom(chrom)
+                if chrom not in snps:
+                    sys.stderr.write('{} not in SNPs. SNPs chroms: {}\n'.format(
+                        chrom, snps.keys()))
+                    raise Exception('Missing chromosome')
+                if loc not in snps[chrom]:
+                    not_in_gene += 1
+                    continue
+                snp = snps[chrom][loc]
+
+                #####################################
+                #  Actually assign the counts here  #
+                #####################################
+
+                for base, count in loc.items():
+                    base = base.upper()  # All comparisons uppercase
+                    if base == snp.pat:
+                        snp.exons.gene.add_pat(count)
+                    elif base == snp.mat:
+                        snp.exons.gene.add_pat(count)
+                    else:
+                        snp.exons.gene.add_other(count)
+
+    # Write out stats
+    sys.stderr.write('In file{}, {} SNPs of {} '.format(count_file,
+                                                        not_in_gene, total) +
+                     'not in genes\n')
+
+    # Return a copy of the genes object and reset the counts of the original.
+    ind_genes = genes.copy()
+    for gene in genes:
+        gene.reset()
+    return ind_genes
+
+
+###############################################################################
+#                               Run as a script                               #
+###############################################################################
+
+
+def main(argv=None):
+    """Command line parsing."""
+
+    usage = """ alleleseq_genes -m ind  [-f fdr_cutoff] [-c columns] [-o out.tsv] gtf_file snp_file [1.cnt [2.cnt ...]]
+        alleleseq_genes -m comb [-f fdr_cutoff] [-c columns] [-o out.tsv] gtf_file snp_file counts.txt
+        alleleseq_genes -h"""
+
+    epilog = dedent("""\
+        Inputs
+        ------
+
+        gtf_file: A simple GTF or GFF format file with all genes of interest.
+        snp_file: snps.txt file created by AlleleSeq in the format::
+                    1\\t3000715\\tT\\tTC\\tGC\\tTG\\tPHASED
+                  Only column [5] (0-based) is used to determine mat/pat for
+                  that position. In this case the result is::
+                    mat: T, pat: G
+        Outputs
+        -------
+
+        In individual mode, the first column will be the individual name, taken
+        from the name of the cnt file.
+
+        In both modes, the remaining columns will be::
+            GENE: The name of the gene
+            TX: The name of the transcript
+            MAT_COUNTS: The sum of all maternal SNPs across the gene
+            PAT_COUNTS: The sum of all paternal SNPs across the gene
+            WIN: M|P (maternal or paternal)
+            P: The binomial pvalue.
+            ... : Any extra columns from the columns file will be added here
+
+        If --pandas is specified, a pickled pandas dataframe is output.
+
+        Output defaults to STDOUT.
+
+        If an fdr_cutoff is provided, the output is filtered to only inlude
+        genes that beat that cutoff.""")
+
+    if not argv:
+        argv = sys.argv[1:]
+
+    parser  = argparse.ArgumentParser(
+        description=__doc__, epilog=epilog, usage=usage,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    # Mode
+    mode = parser.add_argument_group('Mode')
+    mode.add_argument('-m', dest='mode', choices=['ind', 'comb'],
+                      default='ind', help='ind: run on individual .cnt files. ' +
+                      'comb: run on a single counts.txt file')
+
+    # File handling
+    files = parser.add_argument_group('Input and Output Files')
+    files.add_argument('gtf_file',
+                       help="A GFF/GTF file with gene locations.")
+    files.add_argument('snp_file',
+                       help="An AlleleSeq SNP File.")
+    files.add_argument('count_files', nargs='+',
+                       help="The count files from AlleleSeq.")
+    files.add_argument('-c', '--columns', metavar='cols.txt',
+                       help="A tab delimited file with extra columns to " +
+                       "add to output, first column must be same as in " +
+                       "gtf_file.")
+    files.add_argument('-o', dest='outfile', metavar='out.tsv',
+                       help="The output file, default STDOUT.")
+    files.add_argument('--pandas',
+                       help="Output a pickled pandas dataframe to this file.")
+
+    # FDR Calulations
+    fdrcalc = parser.add_argument_group('FDR Calculation')
+    fdrcalc.add_argument('-f', '--fdr_cutoff', type=float,
+                         help="FDR cutoff.")
+    fdrcalc.add_argument('-s', '--simulations', type=int, default=10,
+                         help="Number of simulations for FDR calculation.")
+
+    # Multiprocessing
+    multi = parser.add_argument_group('Multi-threading')
+    multi.add_argument('-j', '--jobs', type=int,
+                       help="Run this many threads, default is " +
+                       "single-threaded. To use all cores on this machine, "
+                       "provide -1.")
+
+    args = parser.parse_args(argv)
+
+    # Check arguments
+    if not args.mode:
+        parser.print_help()
+        sys.stderr.write('\nERROR: Mode (-m) is required.\n')
+        return 1
+
+    with open(args.snp_file) as fin:
+        line = fin.readline().rstrip().split('\t')
+        assert len(line) == 7
+        assert line[6] == 'PHASED' or line[6] == 'HOMO'
+        assert len(line[5]) == 2
+
+    with open(args.gtf_file) as fin:
+        line = fin.readline().rstrip().split('\t')
+        assert len(line) == 9
+        assert 'gene_id' in line[8]
+
+    if args.jobs:
+        jobs = {}
+        if args.jobs == -1:
+            pool = Pool()
+        else:
+            pool = Pool(args.jobs)
+
+    ##################################
+    #  Build reference dictionaries  #
+    ##################################
+
+    ### Get exon info from GTF File###
+    # This function loops through the gtf file and creates an Exon() record
+    # for every exon and a Gene() record for every gene. The Exon records all
+    # contain references to their parent gene, they are returned as a
+    # defaultdict of Chrom() objects with a find method so that a SNP can be
+    # placed in an exon and thus gene by just running::
+    #   gene = exons[chr].find(location, strand)
+    # The gene object has the two methods: add_mat() and add_pat(), which
+    # will increment the count of mat or pat variables. All the genes are
+    # indexed by name and are held in genes.
+    sys.stderr.write('Parsing GTF {}\n'.format(args.gtf_file))
+    exons, genes = parse_gtf(args.gtf_file)
+    sys.stderr.write('{} genes total\n'.format(len(genes)))
+    sys.stderr.write('{} total chromosomes with exons:\n'.format(len(exons)))
+    for chrom, poss in exons.items():
+        sys.stderr.write('\t{}:\t{}\n'.format(chrom,len(poss)))
+
+    # Get SNP info -- just returns a dictionary of SNPs to hold maternal and
+    # paternal alleles.
+    sys.stderr.write('Parsing SNPs {}\n'.format(args.snp_file))
+    snps = parse_snp_file(args.snp_file, exons)
+    sys.stderr.write('{} chromosomes with SNPs:\n'.format(len(snps)))
+    total = 0
+    for chrom, poss in snps.items():
+        sys.stderr.write('\t{}:\t{}\n'.format(chrom,len(poss)))
+        total += len(poss.values())
+    sys.stderr.write('{} total SNPs\n'.format(total))
+
+
+    if args.mode == 'comb':
+        sys.stderr.write('Not implemented yet.\n')
+    # Run in individual mode, meaning we want counts per individual
+    elif args.mode == 'ind':
+        # Loop through the count files and add counts to genes
+        individuals = {}
+        for count_file in args.count_files:
+            ind_name = count_file.split('.')[0]  # Take name from file name
+            sys.stderr.write('Building gene list for {}\n'.format(ind_name))
+            individuals[ind_name] = get_gene_counts(snps, exons, genes, count_file)
+            #  funcargs = (snps, exons, genes, count_file)
+            #  if args.jobs:
+                #  jobs[ind_name] =pool.apply_async(get_gene_counts, funcargs)
+            #  else:
+                #  individuals[ind_name] = get_gene_counts(*funcargs)
+
+        if args.jobs:
+            for ind_name, job in jobs.items():
+                individuals[ind_name] = job.get()
+
+    outfile = open(args.outfile) if args.outfile else sys.stdout
+    for ind, genes in individuals:
+        for gene in genes:
+            outfile.write('\t'.join([ind, gene.name, gene.trans_id,
+                                     str(gene.mat_counts),
+                                     str(gene.pat_counts),
+                                     str(gene.other_counts)]) +
+                          '\n')
+
+# The End.
+if __name__ == '__main__' and '__file__' in globals():
+    sys.exit(main())
