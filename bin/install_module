@@ -10,7 +10,7 @@ Create an lmod style package from a directory
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-24-01 14:04
- Last modified: 2016-04-01 17:09
+ Last modified: 2016-04-21 13:20
 
    DESCRIPTION: To make an lmod package, the same commands need to be run
                 over and over again, and it isn't really useful to do them
@@ -81,6 +81,7 @@ import re
 import sys
 import shutil
 import argparse
+from subprocess import check_call
 from textwrap import dedent
 
 DRYRUN = False
@@ -103,7 +104,8 @@ INST_FLDRS = {'bin': [('PATH', '$root/bin')],
 
 
 def create_package(name, version, folder, prereqs=None, varis=None,
-                   paths=None, only_executables=False, no_default=False):
+                   paths=None, only_executables=False, no_default=False,
+                   python=False):
     """Install a module style package from folder.
 
     :name:             The name of the package.
@@ -117,9 +119,13 @@ def create_package(name, version, folder, prereqs=None, varis=None,
     :only_executables: Assume that the directory contains only executables,
                        create a package with only a bin/ directory.
     :no_default:       Do not make this new package the default.
+    :python:           Treat as a python package
     :returns:          A shell compatible exit code (0 on success)
 
     """
+    if python and only_executables:
+        raise Exception('Cannot provide both python and only_executables')
+
     # Make sure the install folder exists
     if not os.path.isdir(folder):
         sys.stderr.write(folder + ' does not exist\n')
@@ -151,7 +157,7 @@ def create_package(name, version, folder, prereqs=None, varis=None,
             sys.stderr.write(folder + ' should contain executables but contains ' +
                             'none. Make sure your scripts are executable.\n')
             return 3
-    else:
+    elif not python:
         count = 0
         for foldr in INST_FLDRS.keys():
             if os.path.isdir(os.path.join(folder, foldr)):
@@ -178,6 +184,8 @@ def create_package(name, version, folder, prereqs=None, varis=None,
     else:
         if not DRYRUN:
             os.makedirs(module_root)
+        else:
+            sys.stderr.write('Making dir {}\n'.format(module_root))
 
     # Check install path
     install_root = os.path.abspath(os.path.join(INSTALLPATH, name))
@@ -190,6 +198,8 @@ def create_package(name, version, folder, prereqs=None, varis=None,
     if not os.path.isdir(install_root):
         if not DRYRUN:
             os.makedirs(install_root)
+        else:
+            sys.stderr.write('Making dir {}\n'.format(install_root))
 
     # Check for executables
     if only_executables:
@@ -209,6 +219,41 @@ def create_package(name, version, folder, prereqs=None, varis=None,
     ######################
     if only_executables:
         paths = paths + INST_FLDRS['bin'] if paths else INST_FLDRS['bin']
+    elif python:
+        paths = paths if paths else []
+        bin_dir = False
+        lib_dir = False
+        others  = []
+        for i in os.listdir(folder):
+            if i == 'bin':
+                bin_dir = True
+            elif i == 'lib':
+                lib_dir = True
+            else:
+                others.append(i)
+        if bin_dir and lib_dir:
+            paths += INST_FLDRS['bin']
+            paths += [('PYTHONPATH', '$root/lib')]
+        elif bin_dir and others:
+            others = [os.path.join(folder, i) for i in others]
+            if DRYRUN:
+                sys.stderr.write('mkdir {}\n'.format(
+                    os.path.join(folder, 'lib')))
+                for i in others:
+                    sys.stderr.write('mv {} {}\n'.format(
+                        i, os.path.join(folder, 'lib')))
+            else:
+                os.makedirs(os.path.join(folder, 'lib'))
+                for i in others:
+                    check_call(['mv', i, os.path.join(folder, 'lib')])
+            paths += [('PYTHONPATH', '$root/lib')]
+        elif lib_dir:
+            paths += [('PYTHONPATH', '$root/lib')]
+        elif bin_dir:
+            paths += INST_FLDRS['bin']
+        else:
+            paths += [('PYTHONPATH', '$root')]
+
     else:
         paths = paths if paths else []
         for fldr in [i for i in os.listdir(folder) \
@@ -255,11 +300,16 @@ def create_package(name, version, folder, prereqs=None, varis=None,
                 sys.stdout.write('Deleting {}\n'.format(link_file))
             else:
                 os.remove(link_file)
+        curdir = os.path.abspath('.')
         if DRYRUN:
-            sys.stdout.write('Linking {} to {}\n'.format(module_path,
-                                                         link_file))
+            sys.stderr.write('CD to {}\n'.format(module_root))
+            sys.stdout.write('Linking {} to {}\n'.format(
+                os.path.basename(module_path), link_file))
+            sys.stderr.write('CD to {}\n'.format(curdir))
         else:
-            os.symlink(module_path, link_file)
+            os.chdir(module_root)
+            os.symlink(os.path.basename(module_path), link_file)
+            os.chdir(curdir)
 
 
 def make_script(name, version, install_path, paths=None, varis=None,
@@ -280,7 +330,7 @@ def make_script(name, version, install_path, paths=None, varis=None,
     #%Module1.0
 
     proc ModulesHelp {{ }} {{
-        puts stderr "'\\t {name} {version}"
+        puts stderr "{name} {version}"
     }}
 
     module-whatis  "{name} {version}"
@@ -321,9 +371,10 @@ def has_executables(folder):
     """Return True if there are executable files in folder."""
     count = 0
     for file in os.listdir(folder):
-        if os.path.isfile and os.access(file, os.X_OK):
+        file = os.path.join(folder, file)
+        if os.path.isfile(file) and os.access(file, os.X_OK):
             count += 1
-    if count < 1:
+    if count >= 1:
         return True
     return False
 
@@ -357,37 +408,65 @@ def main(argv=None):
     if not argv:
         argv = sys.argv[1:]
 
+    short_desc = "Install a module to the $MODULEPATH, for more info use --help"
+    long_desc  = __doc__
+
     parser  = argparse.ArgumentParser(
-        description=__doc__,
+        description=short_desc, add_help=False,
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Positional arguments
-    parser.add_argument('name',
+    parser.add_argument('name', nargs='?',
                         help="The name of the package")
-    parser.add_argument('version',
+    parser.add_argument('version', nargs='?',
                         help="The version of the package")
-    parser.add_argument('directory',
+    parser.add_argument('directory', nargs='?',
                         help="The directory where the package is installed")
 
     # Optional flags
-    parser.add_argument('-e', dest='exe', action="store_true",
+    insttype = parser.add_argument_group('Install Type')
+    insttype.add_argument('--exe', action="store_true",
                         help="The directory contains only executables")
+    insttype.add_argument('--python', action="store_true",
+                        help="The directory is a python module")
     parser.add_argument('-p', '--prereqs', nargs='+',
                         help="The directory contains only executables")
-    parser.add_argument('--varis', metavar='VAR:variable,[VAR2:variable2]',
+
+    instopts = parser.add_argument_group('Install Options')
+    instopts.add_argument('--varis', metavar='VAR:variable,[VAR2:variable2]',
                         help="Environmental variables to set -root- can be used.")
-    parser.add_argument('--paths', metavar='PATH:path,[PATH2:path]',
+    instopts.add_argument('--paths', metavar='PATH:path,[PATH2:path]',
                         help="Environmental paths to set -root- can be used.")
-    parser.add_argument('--no-default', action="store_true",
+    instopts.add_argument('--no-default', action="store_true",
                         help="Do not make this the default version.")
-    parser.add_argument('--module-path', metavar='',
+
+    advopts = parser.add_argument_group('Advanced Options')
+    advopts.add_argument('--module-path', metavar='',
                         help="Override the module PATH")
-    parser.add_argument('--install-path', metavar='',
+    advopts.add_argument('--install-path', metavar='',
                         help="Override the installation PATH")
-    parser.add_argument('-d', '--dry-run', action="store_true",
-                        help="Don't actually install.")
+
+    addopts = parser.add_argument_group('Additional Options')
+    addopts.add_argument('-d', '--dry-run', action="store_true",
+                         help="Print info and don't actually install.")
+    addopts.add_argument('-h', dest='shelp', action="help",
+                         help="Show this help message and exit.")
+    addopts.add_argument('--help', dest='lhelp', action="store_true",
+                         help="Show detailed help message and exit.")
 
     args = parser.parse_args(argv)
+
+    if args.lhelp:
+        parser.description = long_desc
+        parser.print_help()
+        return
+
+    missing = [i for i in [args.name, args.version, args.directory] if not i]
+    if missing:
+        parser.print_usage()
+        sys.stderr.write('error: the following arguments are required: {}\n'
+                         .format('name, version, directory'))
+        return 2
 
     if args.module_path:
         global MODULEPATH
@@ -423,7 +502,8 @@ def main(argv=None):
         paths = None
 
     return create_package(args.name, args.version, args.directory,
-                          args.prereqs, varis, paths, args.exe, args.no_default)
+                          args.prereqs, varis, paths, args.exe,
+                          args.no_default, args.python)
 
 if __name__ == '__main__' and '__file__' in globals():
     sys.exit(main())
