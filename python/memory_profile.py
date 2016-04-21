@@ -1,3 +1,17 @@
+"""
+Simple profiler for memory usage of a script.
+
+============================================================================
+
+   ORIG AUTHOR: Unknown
+        AUTHOR: Michael D Dacre, mike.dacre@gmail.com
+       CREATED: 2016-44-07 11:03
+ Last modified: 2016-03-07 11:47
+
+   DESCRIPTION: Only works on *nix OSes
+
+============================================================================
+"""
 import os
 _proc_status = '/proc/%d/status' % os.getpid()
 
