@@ -9,7 +9,7 @@ Loop through AlleleSeq .cnt files and pull out incorrect base counts from read.
   ORGANIZATION: Stanford University
        LICENSE: MIT License, property of Stanford, use as you wish
        CREATED: 2016-18-07 16:06
- Last modified: 2016-06-07 21:15
+ Last modified: 2016-06-07 21:32
 
 ============================================================================
 """
@@ -39,7 +39,8 @@ def count_read_positions(bed_file, cnt_files, outfile=sys.stdout, pandas=None):
     snps = parse_bed(bed_file, base=1)  # AlleleSeq is 1 based
 
     data = {'snp_count': [], 'skipped': [], 'ref': [], 'alt': [], 'other': [],
-            'ns': [], 'total': [], 'chrom': [], 'tissue': []}
+            'ns': [], 'total': [], 'chrom': [], 'tissue': [],
+            'other_percent': []}
 
     # Loop through count files and tally
     for cnt_file in cnt_files:
