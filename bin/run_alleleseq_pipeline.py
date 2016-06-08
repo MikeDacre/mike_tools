@@ -10,7 +10,7 @@ Run the core of the alleleseq pipeline.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2016-16-30 14:01
- Last modified: 2016-03-21 12:30
+ Last modified: 2016-05-25 15:01
 
 ============================================================================
 """
@@ -211,7 +211,7 @@ def count(directory, dependencies, type):
                            '../*snps.txt merged_reads.sam ' +
                            '../genome/%s_' + type +
                            '.map {}.cnt '.format(name),
-                           'count', '06:00:00', 4, 16000,
+                           'count', '06:00:00', 16, 32000,
                            modules='python/2.7.5')
     job1 = sl.monitor_submit(count1, dependencies, max_count=MAX_JOBS)
     os.chdir(olddir)

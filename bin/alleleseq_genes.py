@@ -10,7 +10,7 @@ Combine AlleleSeq counts across genes.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-03-25 12:03
- Last modified: 2016-05-11 16:56
+ Last modified: 2016-05-13 23:22
 
           IDEA: AlleleSeq counts alleles and assigns them to mat or pat
                 and then counts alleles in all individuals for each SNP.
@@ -107,7 +107,7 @@ import scipy.stats
 import pandas
 
 # Allow multiprocessing
-from subprocess import check_call
+from subprocess import check_call, call
 from multiprocessing import Pool, cpu_count
 
 # Logging functions
@@ -144,7 +144,7 @@ THRESH2 = 0.05
 NTHRESH = 0.25
 
 # Reset broken multithreading
-#  check_call("taskset -p 0xff %d &>/dev/null" % os.getpid(), shell=True)
+call("taskset -p 0xff %d &>/dev/null" % os.getpid(), shell=True)
 
 # Original notes in FalsePos.py
 FDR_INFO = ''' Some notes on what is going on here.
@@ -364,6 +364,7 @@ def calc_fdr(pvals, target=0.1, sims=5, verbose=False):
     pvs=[e*0.001 for e in range(10)]+[e*0.01 for e in range(1,10)]+[e*0.1 for e in range(1,10)]
     # for a given test pv, find the number of actual pvals that are smaller, and the number of sim pvals that are smaller.
     # FDR is the ratio
+    sys.stderr.write("pval\tpos_in_actual\tmean_sim_pos\tFDR\n")
     for pv in pvs:
         # Get what position the pvalue from pvs is in in the actual pvalues
         # from the input file.
@@ -454,6 +455,9 @@ class Exon(object):
         assert isinstance(gene, Gene)
         self.gene   = gene
 
+        # Set a back link to us
+        self.gene.exons.append(self)
+
     def find(self, loc, strand=None):
         """Return True if loc in self. If strand provided, check that."""
         if strand and not strand == self.strand:
@@ -480,6 +484,9 @@ class Gene(object):
 
         # All the SNPs in this Gene
         self.snps         = []
+
+        # All the exons
+        self.exons        = []
 
         # Raw counts
         self.mat_counts   = 0
@@ -704,7 +711,9 @@ class SNP(object):
             - p is the default 'hypothesized probability of success'
 
         """
-        if len(self) > 1:  # Only bother if we have more than one count.
+        if len(self) > 1 and \
+                (float(self.other_counts)/float(len(self)) < 0.1 or
+                 float(self.n_counts)/float(len(self)) > NTHRESH):
             smaller = min(self.mat_counts, self.pat_counts)
             both    = self.mat_counts + self.pat_counts
 
@@ -747,7 +756,7 @@ class SNP(object):
                        'counts).\n Allele counts: {}; total: {}\nSNP:{}')
                        .format(self.gene.name, self.name, allelecnts, total,
                                self),
-                      'warn')
+                      'debug')
             self.win = 'WEIRD'
             return
 
@@ -1076,10 +1085,15 @@ def parse_gene_bed(bed_file):
             strand = fields[5]
             if gene not in genes:
                 genes[gene] = Gene(gene, trans)
-            # In this function, there is only one 'exon' per gene, and that
-            # is the whole gene.
-            exon = Exon(genes[gene], start, end, strand)
-            exons[chrom].append(exon)
+            # Assign exons
+            starts  = [start+int(i) for i in fields[11].rstrip(',').split(',')]
+            lengths = [int(i) for i in fields[10].rstrip(',').split(',')]
+            assert len(starts) == len(lengths)
+            assert len(starts) == int(fields[9])
+            for strt in starts:
+                exon = Exon(genes[gene], strt,
+                            strt+lengths[starts.index(strt)], strand)
+                exons[chrom].append(exon)
 
     return exons, genes
 
@@ -1171,7 +1185,11 @@ def get_gene_counts(snps, genes, count_file):
                 if chrom not in snps:
                     sys.stderr.write('{} not in SNPs. SNPs chroms: {}\n'.format(
                         chrom, snps.keys()))
-                    raise Exception('Missing chromosome')
+                    logme.log('Missing chromosome ' +
+                              '{}\nChromosomes: {}'.format(chrom,
+                                                           snps.keys()),
+                              'critical')
+                    continue
                 if loc not in snps[chrom]:
                     continue
                 in_gene += 1
@@ -1194,14 +1212,17 @@ def get_gene_counts(snps, genes, count_file):
     for chr, poss in snps.items():
         for pos, snp in poss.items():
             genes[snp.gene.name] = snp.gene
+    # Return a copy of the genes object
+    logme.log('Copying genes dictionary', 'debug')
+    ind_genes = deepcopy(genes)
     logme.log('Summing counts', 'info')
-    for gene in genes.values():
+    for gene in ind_genes.values():
         gene.sum_counts()
     logme.log('Calculating pvalues', 'info')
-    for gene in genes.values():
+    for gene in ind_genes.values():
         gene.calc_pval()
     logme.log('Calculating winners', 'info')
-    for gene in genes.values():
+    for gene in ind_genes.values():
         gene.calc_winner()
 
     # Write out stats
@@ -1209,9 +1230,7 @@ def get_gene_counts(snps, genes, count_file):
                                                          in_gene, total) +
                      'in genes. {:.2f}%\n'.format(100*in_gene/total))
 
-    # Return a copy of the genes object and reset the counts of the original.
-    logme.log('Copying genes dictionary', 'debug')
-    ind_genes = deepcopy(genes)
+    # Reset counts
     if logme.MIN_LEVEL == 'debug':
         mat_counts = 0
         pat_counts = 0
@@ -1260,7 +1279,7 @@ def main(argv=None):
         Inputs
         ------
 
-        gtf_file:   A simple GTF or GFF format file with all genes of interest.
+        gtf_file:   A simple GTF or BED format file with all genes of interest.
         snp_file:   snps.txt file created by AlleleSeq in the format::
                         1\\t3000715\\tT\\tTC\\tGC\\tTG\\tPHASED
                     Only column [5] (0-based) is used to determine mat/pat for
@@ -1603,52 +1622,57 @@ def main(argv=None):
             with open(args.data, 'wb') as fout:
                 pickle.dump(individuals, fout)
 
-        ####################################
-        #  Calculate FDR and filter genes  #
-        ####################################
-
-        #  logme.log('Calculating p-values at FDR {}'.format(args.fdr_cutoff),
-                  #  'info')
-        #  fdr_pvals = {}
-        #  for ind, genes in individuals.items():
-            #  pvals = [(g.mat_counts, g.pat_counts, g.pval) for g in genes.values()]
-            #  fdr_pvals[ind] = calc_fdr(pvals, target=args.fdr_cutoff,
-                                      #  sims=args.simulations,
-                                      #  verbose=args.verbose)
-            #  logme.log('In ind {} p-values smaller than {} beat FDR of {}'
-                      #  .format(ind, fdr_pvals[ind], args.fdr_cutoff), 'info')
-
         ############################
         #  Make pandas dataframes  #
         ############################
+
         inds = {}
         logme.log('Making pandas dataframes', 'info')
         for ind, genes in individuals.items():
             inds[ind] = create_df(genes)
 
-        # Filter by FDR if requested
-        #  if args.filter_fdr:
-            #  logme.log('Filtering genes by FDR less than {}'.format(
-                      #  args.fdr_cutoff), 'info')
-            #  for ind, df in inds.items():
-                #  logme.log('Filtering {}'.format(ind), 'debug')
-                #  df = df.ix[df.pval < fdr_pvals[ind]]
+        ####################################
+        #  Calculate FDR and filter genes  #
+        ####################################
 
-        # Save pandas dfs
-        if args.pandas:
-            logme.log('Writing unflitered pandas dataframes to {}'.format(args.pandas),
-                      'info')
-            with open(args.pandas, 'wb') as fout:
-                pickle.dump(inds, fout)
+        logme.log('Calculating p-values at FDR {}'.format(args.fdr_cutoff),
+                  'info')
+        fdr_pvals = {}
+        for ind, df in inds.items():
+            fdr_pvals[ind] = calc_fdr(
+                [tuple(x) for x in df[['Mat_Counts', 'Pat_Counts', 'pval']].values],
+                target=args.fdr_cutoff, sims=args.simulations,
+                verbose=args.verbose)
+            logme.log('In ind {} p-values smaller than {} beat FDR of {}'
+                      .format(ind, fdr_pvals[ind], args.fdr_cutoff), 'info')
+
+
+        # Filter by FDR if requested
+        if args.filter_fdr:
+            logme.log('Filtering genes by FDR less than {}'.format(
+                      args.fdr_cutoff), 'info')
+            filtered = {}
+            for ind, df in inds.items():
+                logme.log('Filtering {}'.format(ind), 'debug')
+                filtered[ind] = df[df.pval < fdr_pvals[ind]]
+            inds = filtered
 
         # Create merged df
+        newdf = {}
         for ind, df in inds.items():
             cols = ['Ind'] + list(df.columns)
             df['Ind'] = pandas.Series([ind for i in range(0, len(df))],
                                       index=df.index)
-            df = df[cols]
+            newdf[ind] = df[cols]
         logme.log('Merging dictionaries', 'info')
-        master_df = pandas.concat([d for d in inds.values()])
+        master_df = pandas.concat([d for d in newdf.values()])
+
+        # Save pandas dfs
+        if args.pandas:
+            logme.log('Writing pandas dataframe to {}'.format(args.pandas),
+                      'info')
+            with open(args.pandas, 'wb') as fout:
+                pickle.dump(master_df, fout)
 
         # Write the output
         logme.log('Writing output to {}'.format(args.outfile), 'info')

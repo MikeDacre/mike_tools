@@ -12,7 +12,7 @@
 #       LICENSE: MIT License, Property of Stanford, Use as you wish
 #       VERSION: 0.1
 #       CREATED: 2014-08-01 14:25
-# Last modified: 2014-08-01 15:10
+# Last modified: 2016-05-20 11:41
 #
 #   DESCRIPTION: Convert a bed12 file to a gtf
 #
@@ -50,6 +50,6 @@ for i in stdin:
         end   = int(start) + int(lengths[c])
         gene_string = 'gene_id "' + f[3] + '"; transcript_id "' + f[3] + '"; '
         gene_string = gene_string + 'exon_number "' + str(c)
-        print(f[0], source, str(start), str(end), '.', f[5], '.', gene_string,
+        print(f[0], source, 'exon', str(start), str(end), '.', f[5], '.', gene_string,
               sep='\t')
         c = c + 1
