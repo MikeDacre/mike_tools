@@ -10,7 +10,7 @@ Merge peaks in a file by clustering instead of simple overlap merge.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-29-24 16:08
- Last modified: 2016-08-25 16:28
+ Last modified: 2016-08-25 16:41
 
    DESCRIPTION: When calling ATACseq peaks with MACS in different populations,
                 a single peak can be shifted slightly in such a way that
@@ -62,6 +62,12 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
     # minor overlaps
     offset         = 4
     # Load file generator
+    if isinstance(peak_file, str):
+        line_count = int(check_output(
+            "wc -l data/all_peaks_sorted.bed | sed 's/ .*//'", shell=True)
+            .decode().rstrip())
+    else:
+        line_count = None
     pfile          = peak_file_parser(peak_file)
     # Create objects to track stats
     lines          = 0
@@ -75,7 +81,7 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
     # Open outfile and run algorithm
     with open_zipped(outfile, 'w') as fout:
         # Loop through peaks
-        #  for peak in tqdm(pfile):
+        #  for peak in tqdm(pfile, total=line_count, unit='lines'):
         for peak in pfile:
             lines += 1
             overlap_prior = peak.start - offset < prior_peak.end
