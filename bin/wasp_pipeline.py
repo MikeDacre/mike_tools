@@ -12,7 +12,7 @@ Run the entire WASP pipeline with either tophat or STAR.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.2
        CREATED: 2016-07-12 09:02
- Last modified: 2016-03-24 14:15
+ Last modified: 2016-03-27 08:20
 
 ============================================================================
 """
@@ -25,6 +25,9 @@ import logme
 
 MAX_JOBS  = 2000
 PARTITION = 'hbfraser'
+
+STAR_MEM = '40258653917'
+STAR_CORES = 28
 logme.MIN_LEVEL = 'info'  # Change to debug for verbose logging
 logme.LOGFILE   = 'wasp_submit_log.log'
 
@@ -69,7 +72,7 @@ def run_mapping(name, infiles, genome, algorithm='STAR', gtf=None,
                     '--outSAMtype BAM SortedByCoordinate ' +
                     '--outSAMattributes MD NH ' +
                     '--clip5pNbases 6 ' +
-                    '--limitBAMsortRAM 31518962612')
+                    '--limitBAMsortRAM {}'.format(STAR_MEM))
 
         if zipped:
             for fl in new_list:
@@ -94,7 +97,7 @@ def run_mapping(name, infiles, genome, algorithm='STAR', gtf=None,
         raise Exception('Invalid algorithm: {}'.format(algorithm))
 
     return (slurmy.monitor_submit(slurmy.make_job_file(
-        command, name, '24:00:00', 16, partition=PARTITION, modules=modules),
+        command, name, '24:00:00', STAR_CORES, partition=PARTITION, modules=modules),
         dependency, MAX_JOBS), outbam)
 
 
