@@ -10,7 +10,7 @@ Merge peaks in a file by clustering instead of simple overlap merge.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-29-24 16:08
- Last modified: 2016-08-25 17:38
+ Last modified: 2016-08-25 18:40
 
    DESCRIPTION: When calling ATACseq peaks with MACS in different populations,
                 a single peak can be shifted slightly in such a way that
@@ -74,6 +74,7 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
     lines          = 0
     clusters       = 0
     cluster_sizes  = {}
+    extra_pops     = {}
     # First peak
     prior_peak     = next(pfile)
     cluster        = Cluster(prior_peak)
@@ -120,6 +121,12 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
                         cluster_sizes[cluster.count] += 1
                     else:
                         cluster_sizes[cluster.count]  = 1
+                    diff = len(cluster.pops)-len(set(cluster.pops))
+                    if diff:
+                        if diff in extra_pops:
+                            extra_pops[diff] += 1
+                        else:
+                            extra_pops[diff]  = 1
                     clusters    += 1
                     # Write cluster and make new one
                     cluster.write(fout)
@@ -142,6 +149,12 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
                     cluster_sizes[cluster.count] += 1
                 else:
                     cluster_sizes[cluster.count]  = 1
+                diff = len(cluster.pops)-len(set(cluster.pops))
+                if diff:
+                    if diff in extra_pops:
+                        extra_pops[diff] += 1
+                    else:
+                        extra_pops[diff]  = 1
                 clusters    += 1
                 # Write cluster and make new one
                 cluster.write(fout)
@@ -170,6 +183,12 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
                 cluster_sizes[cluster.count] += 1
             else:
                 cluster_sizes[cluster.count]  = 1
+            diff = len(cluster.pops)-len(set(cluster.pops))
+            if diff:
+                if diff in extra_pops:
+                    extra_pops[diff] += 1
+                else:
+                    extra_pops[diff]  = 1
             clusters    += 1
             # Write cluster and make new one
             cluster.write(fout)
@@ -180,6 +199,12 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
             cluster_sizes[cluster.count] += 1
         else:
             cluster_sizes[cluster.count]  = 1
+        diff = len(cluster.pops)-len(set(cluster.pops))
+        if diff:
+            if diff in extra_pops:
+                extra_pops[diff] += 1
+            else:
+                extra_pops[diff]  = 1
         # Write cluster and make new one
         cluster.write(fout)
 
@@ -195,6 +220,12 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
                   'Cluster sizes:\n')
     for k, v in OrderedDict(cluster_sizes).items():
         logfile.write('\t{}:\t{}\n'.format(k, v))
+    if extra_pops:
+        logfile.write('Extra peaks for a single population in clusters:\n')
+        for k, v in OrderedDict(extra_pops).items():
+            logfile.write('\t{}:\t{}\n'.format(k, v))
+    else:
+        logfile.write('No extra peaks in any cluster.\n')
 
 
 class Cluster(object):
@@ -214,6 +245,7 @@ class Cluster(object):
         self.len         = self.start - self.end
         self.fold_change = peak.fold_change
         self.log10p      = peak.log10p
+        self.pops        = [peak.pop]
         self.count       = 1
 
     def add(self, peak):
@@ -225,6 +257,7 @@ class Cluster(object):
         self.end    = max(self.end, peak.end)
         self.len    = self.start - self.end
         self.count += 1
+        self.pops.append(peak.pop)
         # Get average fold change and log10p
         self.fold_change = (self.fold_change+peak.fold_change)/2
         self.log10p      = (self.log10p+peak.log10p)/2
@@ -254,16 +287,17 @@ class Cluster(object):
 
 class Peak(object):
 
-    """A simple named list to hold (chr,start,end,fold_change,log10pval)."""
+    """A simple named list to hold peak details."""
 
-    def __init__(self, chrom, start, end, fold, l10p):
+    def __init__(self, chrom, start, end, pop, fold, l10p):
         """Create an instance of self.
 
-        :plist: (chr,start,end,fold_change,log10pval).
+        :plist: (chr,start,end,pop,fold_change,log10pval).
         """
         self.chrom       = chrom
         self.start       = int(start)
         self.end         = int(end)
+        self.pop         = pop.split('_')[0]
         self.fold_change = float(fold)
         self.log10p      = float(l10p)
 
@@ -301,12 +335,12 @@ def bed_file(file_handle):
     """Parse an open bed file, use with peak_file().
 
     :file_handle: An open file handle to a bed file.
-    :yields:      (chr,start,end,fold_change,log10pval)
+    :yields:      Peak object
 
     """
     for line in file_handle:
-        chrom, start, end, _, _, _, fold, l10p, _ = line.rstrip().split('\t')
-        yield Peak(chrom, start, end, fold, l10p)
+        chrom, start, end, pop, _, _, fold, l10p, _ = line.rstrip().split('\t')
+        yield Peak(chrom, start, end, pop, fold, l10p)
 
 
 def in_name(file_handle, search_string):
