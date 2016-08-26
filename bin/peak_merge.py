@@ -10,7 +10,7 @@ Merge peaks in a file by clustering instead of simple overlap merge.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-29-24 16:08
- Last modified: 2016-08-25 16:45
+ Last modified: 2016-08-25 17:35
 
    DESCRIPTION: When calling ATACseq peaks with MACS in different populations,
                 a single peak can be shifted slightly in such a way that
@@ -66,7 +66,7 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
     if isinstance(peak_file, str):
         line_count = int(check_output(
             "wc -l data/all_peaks_sorted.bed | sed 's/ .*//'", shell=True)
-            .decode().rstrip())
+                         .decode().rstrip())
     else:
         line_count = None
     pfile          = peak_file_parser(peak_file)
@@ -79,24 +79,24 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
     cluster        = Cluster(prior_peak)
     lines         += 1
     clusters      += 1
+    # Current peak, due to the nature of iterators we need to create a lag.
+    peak           = next(pfile)
+    lines         += 1
+    # Use progress bar if outfile not open already.
+    piter = pfile if isinstance(outfile, str) or logme.MIN_LEVEL == 'debug'\
+        else tqdm(pfile, total=line_count, unit='lines')
     # Open outfile and run algorithm
     with open_zipped(outfile, 'w') as fout:
         # Loop through peaks
-        #  for peak in tqdm(pfile, total=line_count, unit='lines'):
-        for peak in pfile:
+        for next_peak in piter:
+            print(prior_peak.chrom, prior_peak.start, prior_peak.end,
+                  peak.chrom, peak.start, peak.end,
+                  next_peak.chrom, next_peak.start, next_peak.end)
             lines += 1
-            overlap_prior = peak.start - offset < prior_peak.end
+            overlap_prior = peak.start < prior_peak.end - offset
             logme.log('Prior overlap: {}'.format(overlap_prior), 'debug')
-            try:
-                next_peak    = next(pfile)
-                overlap_next = peak.end - offset < next_peak.start
-                logme.log('Next overlap: {}'.format(overlap_next), 'debug')
-            # Last peak
-            except StopIteration:
-                next_peak    = None
-                overlap_next = False
-                logme.log('Last peak of file: {}_{}'.format(
-                    peak.chrom, peak.start), 'debug')
+            overlap_next = next_peak.start < peak.end - offset
+            logme.log('Next overlap: {}'.format(overlap_next), 'debug')
 
             ######################
             #  Actual Algorithm  #
@@ -108,12 +108,13 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
                                            float(cluster.len))
                 logme.log('Prior overlap amount: {}'
                           .format(prior_overlap_amount), 'debug')
-                #  next_overlap_amount  = (float(peak.end - next_peak.start) /
-                #                          float(next_peak.end - next_peak.start))
                 prior_peak = peak
                 # Overlap prior more than 75%, add to prior cluster.
                 if prior_overlap_amount > overlap:
                     cluster.add(peak)
+                    # Prep for next run
+                    prior_peak = peak
+                    peak       = next_peak
                     continue
                 # Overlap prior less than 75%, make new cluster.
                 else:
@@ -126,11 +127,16 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
                     # Write cluster and make new one
                     cluster.write(fout)
                     cluster = Cluster(peak)
+                    # Prep for next run
+                    prior_peak = peak
+                    peak       = next_peak
                     continue
             # Overlap only prior, add to cluster.
             elif overlap_prior:
                 cluster.add(peak)
+                # Prep for next run
                 prior_peak = peak
+                peak       = next_peak
                 continue
             # Overlap next or none, make new cluster.
             else:
@@ -143,8 +149,44 @@ def peak_merge(peak_file, outfile=sys.stdout, overlap=.75, logfile=sys.stderr):
                 # Write cluster and make new one
                 cluster.write(fout)
                 cluster      = Cluster(peak)
-                prior_peak   = peak
+                # Prep for next run
+                prior_peak = peak
+                peak       = next_peak
                 continue
+
+            # Prep for next run
+            prior_peak = peak
+            peak       = next_peak
+
+        # Last line
+        logme.log('Last peak of file: {}_{}'.format(peak.chrom, peak.start),
+                  'debug')
+        overlap_prior = peak.start - offset < prior_peak.end
+        logme.log('Prior overlap: {}'.format(overlap_prior), 'debug')
+        if overlap_prior:
+            cluster.add(peak)
+            prior_peak = peak
+        # Overlap next or none, make new cluster.
+        else:
+            # Stats
+            if cluster.count in cluster_sizes:
+                cluster_sizes[cluster.count] += 1
+            else:
+                cluster_sizes[cluster.count]  = 1
+            clusters    += 1
+            # Write cluster and make new one
+            cluster.write(fout)
+            cluster      = Cluster(peak)
+        # This is the end so write the last cluster
+        # Stats
+        if cluster.count in cluster_sizes:
+            cluster_sizes[cluster.count] += 1
+        else:
+            cluster_sizes[cluster.count]  = 1
+        # Write cluster and make new one
+        cluster.write(fout)
+
+        # Done.
 
     # Print stats
     logfile.write('\n')
