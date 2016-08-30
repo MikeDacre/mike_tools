@@ -10,7 +10,7 @@ Merge peaks in a file by clustering instead of simple overlap merge.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-29-24 16:08
- Last modified: 2016-08-25 18:40
+ Last modified: 2016-08-30 11:25
 
    DESCRIPTION: When calling ATACseq peaks with MACS in different populations,
                 a single peak can be shifted slightly in such a way that
@@ -271,8 +271,8 @@ class Cluster(object):
             '\t'.join(
                 [
                     str(i) for i in [
-                        self.chrom, self.start, self.end, self.count,
-                        self.fold_change, self.log10p
+                        self.chrom, self.start, self.end, self.name,
+                        self.count, self.fold_change, self.log10p
                     ]
                 ]
             )
