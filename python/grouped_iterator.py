@@ -10,7 +10,7 @@ Iterate through a pre-sorted text file and return lines as a group.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-29-27 16:09
- Last modified: 2016-09-27 16:59
+ Last modified: 2016-09-27 17:07
 
 ============================================================================
 """
@@ -20,7 +20,8 @@ import gzip
 import bz2
 
 
-def giterate(infile, groupby, columns=None, sep='\t', pandas=False):
+def giterate(infile, groupby, columns=None, sep='\t', header=False,
+             pandas=False):
     """Iterate through a text file and yield lines in groups.
 
     :infile:  The path to a plain text, gzipped, or bzipped text file or a file
@@ -29,6 +30,8 @@ def giterate(infile, groupby, columns=None, sep='\t', pandas=False):
     :columns: Either None, or an integer count of columns, or a list of column
               names you would like to use to access your data. If integer is
               provided then column count is confirmed.
+    :header:  If true, first line is used as column names if none provided or
+              skipped.
     :pandas:  Yield a pandas dataframe for every group instead of a list of
               lists or Line objects.
     :yields:  Default is a list of lists for each group. If pandas is True,
@@ -49,6 +52,10 @@ def giterate(infile, groupby, columns=None, sep='\t', pandas=False):
     with open_zipped(infile) as fin:
         grp = []
         nxt = ''
+        if header:
+            head = fin.readline()
+            if not columns:
+                columns = head.rstrip().split(sep)
         for line in fin:
             fields = fin.rstrip().split(sep)
             if collen:
