@@ -10,12 +10,10 @@ Iterate through a pre-sorted text file and return lines as a group.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-29-27 16:09
- Last modified: 2016-09-27 17:07
+ Last modified: 2016-09-27 17:16
 
 ============================================================================
 """
-import os
-import sys
 import gzip
 import bz2
 
@@ -26,7 +24,8 @@ def giterate(infile, groupby, columns=None, sep='\t', header=False,
 
     :infile:  The path to a plain text, gzipped, or bzipped text file or a file
               handle.
-    :groupby: An integer reference to the column you wish to group on.
+    :groupby: An integer reference to the column you wish to group on or a
+              column name if either header or column names provided.
     :columns: Either None, or an integer count of columns, or a list of column
               names you would like to use to access your data. If integer is
               provided then column count is confirmed.
@@ -43,10 +42,8 @@ def giterate(infile, groupby, columns=None, sep='\t', header=False,
 
     if isinstance(columns, list):
         collen  = len(columns)
-        useline = True
     else:
         collen  = columns if isinstance(columns, int) else None
-        useline = False
         columns = None
 
     with open_zipped(infile) as fin:
@@ -56,8 +53,14 @@ def giterate(infile, groupby, columns=None, sep='\t', header=False,
             head = fin.readline()
             if not columns:
                 columns = head.rstrip().split(sep)
+        if isinstance(groupby, str):
+            if isinstance(columns, list):
+                groupby = columns.index(groupby)
+            else:
+                raise ValueError("groupby cannot be a string if neither " +
+                                 "header nor column names specified")
         for line in fin:
-            fields = fin.rstrip().split(sep)
+            fields = line.rstrip().split(sep)
             if collen:
                 assert collen == fields
             if not nxt:
@@ -71,7 +74,7 @@ def giterate(infile, groupby, columns=None, sep='\t', header=False,
                 if pandas:
                     out = pd.DataFrame(grp)
                     if columns:
-                        df.columns = columns
+                        out.columns = columns
                 else:
                     out = grp
                 grp = [fields]
