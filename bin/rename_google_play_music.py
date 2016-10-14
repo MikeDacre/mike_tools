@@ -7,7 +7,7 @@ Rename mp3s as '[track] [name].mp3'.
 
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
        CREATED: 2016-37-17 16:02
- Last modified: 2016-02-23 09:54
+ Last modified: 2016-08-19 15:39
 
 ============================================================================
 """
@@ -15,6 +15,7 @@ import os
 import sys
 import argparse
 import mutagen.mp3
+import re
 
 
 def rename_files(files, directory='', folders=False):
@@ -49,10 +50,13 @@ def rename_files(files, directory='', folders=False):
                 os.makedirs(root_path)
         else:
             root_path = directory
-        os.rename(fl, os.path.join(root_path,
-                                   '{0:0>2} {1}.mp3'.format(
-                                       str(metadata['TRCK']).split('/')[0],
-                                       metadata['TIT2'])))
+        new_name = os.path.join(
+            root_path, '{0:0>2} {1}.mp3'.format(
+                str(metadata['TRCK']).split('/')[0],
+                re.sub(r'/', r'_', str(metadata['TIT2']))
+            )
+        )
+        os.rename(fl, new_name)
 
 
 def main(argv=None):

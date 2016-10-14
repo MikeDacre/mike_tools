@@ -2,44 +2,67 @@
 ============================================================================
 
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
-   ORIG AUTHOR: Brent Pedersen (University of Utah)
-           URL:
-https://github.com/brentp/bio-playground/blob/master/plots/manhattan-plot.py
 
        LICENSE: MIT License
        VERSION: 1.0
 
        CREATED: 2016-30-13 12:01
- Last modified: 2016-01-13 17:13
+ Last modified: 2016-09-23 16:56
 
-   DESCRIPTION: Create a manhattan plot from a dictionary of
-                chr->(position, p-value)
+   DESCRIPTION: Various little plotting functions
 
-         USAGE: import manhattan_plot
-                manhattan_plot.plot(dict, sig_line=0.05, title='GWAS',
+         USAGE: import plots
+                plots.density_scatter(x, y)
+                plots.manhattan_plot(dict, sig_line=0.05, title='GWAS',
                                     image_path='./plot.png')
 
 ============================================================================
 """
 from itertools import groupby, cycle
 from operator import itemgetter
-from matplotlib import pyplot as plt
 import numpy as np
+from matplotlib import pyplot as plt
+from scipy.stats import gaussian_kde
 
-__all__ = ['plot']
+__all__ = ['manhattan', 'density_scatter']
+
 
 ###############################################################################
-#                               Primary Function                              #
+#                               Plot functions                                #
 ###############################################################################
 
 
-def plot(chrdict, sig_line=0.001, title=None, image_path=None,
+def density_scatter(x, y):
+    """Create a density scatter plot of x v y.
+
+    From: http://stackoverflow.com/questions/20105364/how-can-i-make-a-scatter-plot-colored-by-density-in-matplotlib
+
+    :returns: fig object.
+
+    """
+
+    # Calculate the point density
+    xy = np.vstack([x,y])
+    z = gaussian_kde(xy)(xy)
+
+    # Sort the points by density, so that the densest points are plotted last
+    idx = z.argsort()
+    x, y, z = x[idx], y[idx], z[idx]
+
+    fig, ax = plt.subplots()
+    ax.scatter(x, y, c=z, s=50, edgecolor='')
+    return fig
+
+
+def manhattan(chrdict, sig_line=0.001, title=None, image_path=None,
          colors='bgrcmyk', log_scale=True, line_graph=False):
     """
     Description: Plot a manhattan plot from a dictionary of
                  'chr'->(pos, p-value) with a significance line drawn at
                  the significance point defined by sig_line, which is then
                  corrected for multiple hypothesis testing.
+
+    https://github.com/brentp/bio-playground/blob/master/plots/manhattan-plot.py
 
         Returns: A matplotlib.pyplot.figure() object
 
@@ -141,6 +164,7 @@ def plot(chrdict, sig_line=0.001, title=None, image_path=None,
     if image_path:
         plt.savefig(image_path)
     return f
+
 
 ###############################################################################
 #                              Private Functions                              #
