@@ -87,14 +87,20 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, label_top=5, fig=None,
                       edgecolor='', label=None, picker=True)
     else:
         # Plot the points as blue dots
-        s = a.plot(x, y, 'o', color='b')
+        s = a.plot(x, y, 'o', color='b', label=None, picker=True)
 
     if log_scale:
         a.loglog()
 
-    if log_scale == 'negative':
-        a.invert_xaxis()
-        a.invert_yaxis()
+    # Plot a 1-1 line in the background
+    a.plot(mlim, mlim, '-', color='0.75')
+
+    # Plot the regression line ober the top in green
+    a.plot(x, func, '-', color='g',
+           label='r2: {:.2}\np:  {:.2}'.format(r, p))
+
+    a.set_xlim(mlim)
+    a.set_ylim(mlim)
 
     if labels is not None:
         # Label most different dots
@@ -104,12 +110,9 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, label_top=5, fig=None,
         adjust_text(text, ax=a, text_from_points=True,
                     arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
 
-    # Plot a 1-1 line in the background
-    a.plot(mlim, mlim, '-', color='0.75')
-
-    # Plot the regression line ober the top in green
-    a.plot(x, func, '-', color='g',
-           label='r2: {:.2}\np:  {:.2}'.format(r, p))
+    if log_scale == 'negative':
+        a.invert_xaxis()
+        a.invert_yaxis()
 
     # Set labels, title, and legend location
     a.set_xlabel(xlabel, fontsize=15)
