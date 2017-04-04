@@ -20,8 +20,9 @@ from adjustText import adjust_text
 ###############################################################################
 
 
-def scatter(x, y, xlabel, ylabel, title, labels=None, label_top=5, fig=None,
-            ax=None, density=True, log_scale=False, legend='best'):
+def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
+            ax=None, density=True, log_scale=False, legend='best',
+            label_lim=10, shift_labels=False):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
@@ -37,12 +38,15 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, label_top=5, fig=None,
         xlabel (str):    A label for the x axis
         ylabel (str):    A label for the y axis
         title (str):     Name of the plot
+        labels (Series): Labels to show
         fig:             A pyplot figure
         ax:              A pyplot axes object
         density (bool):  Color points by density
         log_scale (str): Plot in log scale, can also be 'negative' for
                          negative log scale.
         legend (str):    The location to place the legend
+        label_lim (int): Only show top # labels on each side of the line
+        shift_labels:    If True, try to spread labels out. Imperfect.
 
     Returns:
         (fig, ax): A pyplot figure and axis object in a tuple
@@ -99,16 +103,29 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, label_top=5, fig=None,
     a.plot(x, func, '-', color='g',
            label='r2: {:.2}\np:  {:.2}'.format(r, p))
 
-    a.set_xlim(mlim)
-    a.set_ylim(mlim)
+    a.legend(
+        loc=legend, fancybox=True, fontsize=13,
+        handlelength=0, handletextpad=0
+    ).legendHandles[0].set_visible(False)
 
     if labels is not None:
         # Label most different dots
-        text  = get_labels(labels, x, y, label_top, True, log_scale)
-        text += get_labels(labels, x, y, label_top, False, log_scale)
-        text = [a.text(*i) for i in text]
-        adjust_text(text, ax=a, text_from_points=True,
-                    arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
+        text = get_labels(labels, x, y, label_lim, log_scale)
+        text = [a.text(*i) for i in set(text)]
+        if shift_labels:
+            if log_scale:
+                adjust_text(text, ax=a, text_from_points=True,
+                            expand_text=(0.1, .15), expand_align=(0.15, 0.8),
+                            expand_points=(0.1, 10.9),
+                            draggable=True,
+                            arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
+            else:
+                adjust_text(text, ax=a, text_from_points=True,
+                            arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
+
+    if labels is None:
+        a.set_xlim(mlim)
+        a.set_ylim(mlim)
 
     if log_scale == 'negative':
         a.invert_xaxis()
@@ -121,43 +138,55 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, label_top=5, fig=None,
 
     plt.xticks(rotation=30)
 
-    a.legend(
-        loc=legend, fancybox=True, fontsize=13,
-        handlelength=0, handletextpad=0
-    ).legendHandles[0].set_visible(False)
-
     return f, a
 
 
-def get_labels(labels, x, y, max, x_m_y, log_scale):
+def get_labels(labels, x, y, lim, log_scale):
+    """Choose most interesting labels."""
     p = pd.concat([pd.Series(labels).reset_index(drop=True),
                    pd.Series(x).reset_index(drop=True),
                    pd.Series(y).reset_index(drop=True)], axis=1)
     p.columns = ['label', 'x', 'y']
-    if x_m_y:
-        if log_scale:
-            p['diff'] = np.log10(p.x) - np.log10(p.y)
-        else:
-            p['diff'] = p.x - p.y
+    # Add calculation columns
+    p['small'] = p.x*p.y
+    p['interesting'] = (
+        (p.small.apply(lambda x: 1/x)) *
+        10**np.abs(np.log10(p.x) - np.log10(p.y))
+    )
+    if log_scale:
+        p['diff'] = np.log10(p.x) - np.log10(p.y)
+        p['adiff'] = np.log10(p.y) - np.log10(p.x)
     else:
-        if log_scale:
-            p['diff'] = np.log10(p.y) - np.log10(p.x)
-        else:
-            p['diff'] = p.y - p.x
+        p['diff'] = p.x - p.y
+        p['adiff'] = p.y - p.x
+    # Get top smallest pvalues first 5% of points
+    p = p.sort_values('small', ascending=True)
+    labels = pick_top(p, lim*0.05)
+    # Get most different and significant 55% of points
+    p = p.sort_values('interesting', ascending=False)
+    labels += pick_top(p, lim*0.55, labels)
+    # Get most above line, 20% of points
     p = p.sort_values('diff', ascending=True)
-    locs = []
-    text = []
+    labels += pick_top(p, lim*0.2, labels)
+    # Get most below line, 20% of points
+    p = p.sort_values('adiff', ascending=True)
+    labels += pick_top(p, lim*0.2, labels)
+    return labels
+
+
+def pick_top(p, lim, locs=None):
+    """Pick top points if they aren't already in locs."""
+    locs  = locs if locs else []
+    text  = []
     count = 0
     for l in p.index.to_series().tolist():
-        loc = (float(p.loc[l]['x']), float(p.loc[l]['y']))
+        loc = (float(p.loc[l]['x']), float(p.loc[l]['y']), p.loc[l]['label'])
         if loc in locs:
             continue
         locs.append(loc)
+        text.append(loc)
         count += 1
-        text.append((p.loc[l]['x'], p.loc[l]['y'], p.loc[l]['label']))
-        #  a.annotate(p.loc[l]['label'], loc, xytext=(30,0),
-                   #  textcoords='offset points')
-        if count > max:
+        if count >= lim:
             break
     return text
 
