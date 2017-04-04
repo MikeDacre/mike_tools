@@ -2,14 +2,17 @@
 A collection of plotting functions to use with pandas, numpy, and pyplot.
 
        Created: 2016-36-28 11:10
- Last modified: 2016-10-28 18:20
 """
 from operator import itemgetter
 from itertools import groupby, cycle
+import pandas as pd
 import numpy as np
 import scipy.stats as sts
 from scipy.stats import gaussian_kde
 from matplotlib import pyplot as plt
+import seaborn as sns
+import networkx as nx
+from adjustText import adjust_text
 
 
 ###############################################################################
@@ -17,8 +20,9 @@ from matplotlib import pyplot as plt
 ###############################################################################
 
 
-def scatter(x, y, xlabel, ylabel, title, fig=None, ax=None,
-            density=True, log_scale=False, legend='best'):
+def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
+            ax=None, density=True, log_scale=False, legend='best',
+            label_lim=10, shift_labels=False):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
@@ -34,55 +38,41 @@ def scatter(x, y, xlabel, ylabel, title, fig=None, ax=None,
         xlabel (str):    A label for the x axis
         ylabel (str):    A label for the y axis
         title (str):     Name of the plot
+        labels (Series): Labels to show
         fig:             A pyplot figure
         ax:              A pyplot axes object
         density (bool):  Color points by density
         log_scale (str): Plot in log scale, can also be 'negative' for
                          negative log scale.
         legend (str):    The location to place the legend
+        label_lim (int): Only show top # labels on each side of the line
+        shift_labels:    If True, try to spread labels out. Imperfect.
 
     Returns:
         (fig, ax): A pyplot figure and axis object in a tuple
     """
     f, a = _get_fig_ax(fig, ax)
     #  a.grid(False)
+
     # Set up log scaling if necessary
     if log_scale:
-        a.loglog()
-        if log_scale == 'negative':
-            lx = -np.log10(x)
-            ly = -np.log10(y)
-            a.invert_xaxis()
-            a.invert_yaxis()
-            mx = max(np.max(lx), np.max(ly))
-            mn = min(np.min(lx), np.min(ly))
-            mlim = (10**(-mn+1), 10**(-mx-1))
-            # Do the regression
-            m, b, r, p, _ = sts.linregress(lx, ly)
-            func = 10**(m*-lx + b)
-        else:
-            lx = np.log10(x)
-            ly = np.log10(y)
-            mx = max(np.max(lx), np.max(ly))
-            mn = min(np.min(lx), np.min(ly))
-            mlim = (10**(mn-1), 10**(mx+1))
-            # Do the regression
-            m, b, r, p, _ = sts.linregress(lx, ly)
-            func = 10**(m*lx + b)
+        lx = np.log10(x)
+        ly = np.log10(y)
+        mx = max(np.max(lx), np.max(ly))
+        mn = min(np.min(lx), np.min(ly))
+        mlim = (10**(mn-1), 10**(mx+1))
+        # Do the regression
+        m, b, r, p, _ = sts.linregress(lx, ly)
+        func = 10**(m*lx + b)
     # No log
     else:
         mx = max(np.max(x), np.max(y))
         mn = min(np.min(x), np.min(y))
         mlim = (mn+(0.01*(int(mn)-1)), mx+(0.01*(int(mx)+1)))
-        print(mlim)
         # Do the regression
         m, b, r, p, _ = sts.linregress(x, y)
         func = m*x + b
-    # Define the limits of the plot, we want a 1:1 ratio of axes
-    a.set_xlim(*mlim)
-    a.set_ylim(*mlim)
-    # Plot a 1-1 line in the background
-    a.plot(mlim, mlim, '-', color='0.75')
+
     # Density plot
     if density:
         if log_scale:
@@ -96,27 +86,151 @@ def scatter(x, y, xlabel, ylabel, title, fig=None, ax=None,
         # Sort the points by density, so that the densest points are plotted last
         idx = z.argsort()
         x2, y2, z = x[idx], y[idx], z[idx]
-        a.scatter(x2, y2, c=z, s=50, cmap='plasma', edgecolor='')
+        s = a.scatter(x2, y2, c=z, s=50,
+                      cmap=sns.cubehelix_palette(8, as_cmap=True),
+                      edgecolor='', label=None, picker=True)
     else:
         # Plot the points as blue dots
-        a.plot(x, y, 'o', color='b')
+        s = a.plot(x, y, 'o', color='b', label=None, picker=True)
+
+    if log_scale:
+        a.loglog()
+
+    # Plot a 1-1 line in the background
+    a.plot(mlim, mlim, '-', color='0.75')
+
     # Plot the regression line ober the top in green
     a.plot(x, func, '-', color='g',
            label='r2: {:.2}\np:  {:.2}'.format(r, p))
-    # Set labels, title, and legend location
-    a.set_xlabel(xlabel, fontsize=15)
-    a.set_ylabel(ylabel, fontsize=15)
-    a.set_title(title, fontsize=20)
-    a.tick_params(axis='both', which='major', direction='inout', labelsize=13)
-    a.tick_params(axis='both', which='minor', direction='in', labelsize=8)
-    a.get_xaxis().tick_bottom()
-    a.get_yaxis().tick_left()
-    plt.xticks(rotation=30)
+
     a.legend(
         loc=legend, fancybox=True, fontsize=13,
         handlelength=0, handletextpad=0
     ).legendHandles[0].set_visible(False)
+
+    if labels is not None:
+        # Label most different dots
+        text = get_labels(labels, x, y, label_lim, log_scale)
+        text = [a.text(*i) for i in set(text)]
+        if shift_labels:
+            if log_scale:
+                adjust_text(text, ax=a, text_from_points=True,
+                            expand_text=(0.1, .15), expand_align=(0.15, 0.8),
+                            expand_points=(0.1, 10.9),
+                            draggable=True,
+                            arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
+            else:
+                adjust_text(text, ax=a, text_from_points=True,
+                            arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
+
+    if labels is None:
+        a.set_xlim(mlim)
+        a.set_ylim(mlim)
+
+    if log_scale == 'negative':
+        a.invert_xaxis()
+        a.invert_yaxis()
+
+    # Set labels, title, and legend location
+    a.set_xlabel(xlabel, fontsize=15)
+    a.set_ylabel(ylabel, fontsize=15)
+    a.set_title(title, fontsize=20)
+
+    plt.xticks(rotation=30)
+
     return f, a
+
+
+def get_labels(labels, x, y, lim, log_scale):
+    """Choose most interesting labels."""
+    p = pd.concat([pd.Series(labels).reset_index(drop=True),
+                   pd.Series(x).reset_index(drop=True),
+                   pd.Series(y).reset_index(drop=True)], axis=1)
+    p.columns = ['label', 'x', 'y']
+    # Add calculation columns
+    p['small'] = p.x*p.y
+    p['interesting'] = (
+        (p.small.apply(lambda x: 1/x)) *
+        10**np.abs(np.log10(p.x) - np.log10(p.y))
+    )
+    if log_scale:
+        p['diff'] = np.log10(p.x) - np.log10(p.y)
+        p['adiff'] = np.log10(p.y) - np.log10(p.x)
+    else:
+        p['diff'] = p.x - p.y
+        p['adiff'] = p.y - p.x
+    # Get top smallest pvalues first 5% of points
+    p = p.sort_values('small', ascending=True)
+    labels = pick_top(p, lim*0.05)
+    # Get most different and significant 55% of points
+    p = p.sort_values('interesting', ascending=False)
+    labels += pick_top(p, lim*0.55, labels)
+    # Get most above line, 20% of points
+    p = p.sort_values('diff', ascending=True)
+    labels += pick_top(p, lim*0.2, labels)
+    # Get most below line, 20% of points
+    p = p.sort_values('adiff', ascending=True)
+    labels += pick_top(p, lim*0.2, labels)
+    return labels
+
+
+def pick_top(p, lim, locs=None):
+    """Pick top points if they aren't already in locs."""
+    locs  = locs if locs else []
+    text  = []
+    count = 0
+    for l in p.index.to_series().tolist():
+        loc = (float(p.loc[l]['x']), float(p.loc[l]['y']), p.loc[l]['label'])
+        if loc in locs:
+            continue
+        locs.append(loc)
+        text.append(loc)
+        count += 1
+        if count >= lim:
+            break
+    return text
+
+
+def repel_labels(ax, text, k=0.01):
+    G = nx.DiGraph()
+    data_nodes = []
+    init_pos = {}
+    for xi, yi, label in text:
+        data_str = 'data_{0}'.format(label)
+        G.add_node(data_str)
+        G.add_node(label)
+        G.add_edge(label, data_str)
+        data_nodes.append(data_str)
+        init_pos[data_str] = (xi, yi)
+        init_pos[label] = (xi, yi)
+
+    pos = nx.spring_layout(G, pos=init_pos, fixed=data_nodes, k=k)
+
+    # undo spring_layout's rescaling
+    pos_after = np.vstack([pos[d] for d in data_nodes])
+    pos_before = np.vstack([init_pos[d] for d in data_nodes])
+    scale, shift_x = np.polyfit(pos_after[:,0], pos_before[:,0], 1)
+    scale, shift_y = np.polyfit(pos_after[:,1], pos_before[:,1], 1)
+    shift = np.array([shift_x, shift_y])
+    for key, val in pos.items():
+        pos[key] = (val*scale) + shift
+
+    for label, data_str in G.edges():
+        ax.annotate(label,
+                    xy=pos[data_str], xycoords='data',
+                    xytext=pos[label], textcoords='data',
+                    #  arrowprops=dict(arrowstyle="->",
+                                    #  shrinkA=0, shrinkB=0,
+                                    #  connectionstyle="arc3",
+                                    #  color='red'),
+                    )
+    # expand limits
+    all_pos = np.vstack(pos.values())
+    x_span, y_span = np.ptp(all_pos, axis=0)
+    mins = np.min(all_pos-x_span*0.15, 0)
+    maxs = np.max(all_pos+y_span*0.15, 0)
+    ax.set_xlim([mins[0], maxs[0]])
+    ax.set_ylim([mins[1], maxs[1]])
 
 
 ###############################################################################
