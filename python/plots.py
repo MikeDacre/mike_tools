@@ -5,12 +5,20 @@ A collection of plotting functions to use with pandas, numpy, and pyplot.
 """
 from operator import itemgetter
 from itertools import groupby, cycle
-import pandas as pd
+
 import numpy as np
 import scipy.stats as sts
 from scipy.stats import gaussian_kde
+import pandas as pd
+
+import statsmodels.api as sm
+from statsmodels.sandbox.regression.predstd import wls_prediction_std
+
 from matplotlib import pyplot as plt
+import matplotlib.patches as mpatches
+
 import seaborn as sns
+
 import networkx as nx
 from adjustText import adjust_text
 
@@ -22,7 +30,8 @@ from adjustText import adjust_text
 
 def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
             ax=None, density=True, log_scale=False, legend='best',
-            label_lim=10, shift_labels=False):
+            label_lim=10, shift_labels=False, highlight=None,
+            highlight_label=None, add_text=None, reg_details=True):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
@@ -47,6 +56,9 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         legend (str):    The location to place the legend
         label_lim (int): Only show top # labels on each side of the line
         shift_labels:    If True, try to spread labels out. Imperfect.
+        highlight_label (Series): Boolean series of same len as x/y
+        reg_details (bool): Print regression summary
+
 
     Returns:
         (fig, ax): A pyplot figure and axis object in a tuple
@@ -62,16 +74,36 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         mn = min(np.min(lx), np.min(ly))
         mlim = (10**(mn-1), 10**(mx+1))
         # Do the regression
-        m, b, r, p, _ = sts.linregress(lx, ly)
-        func = 10**(m*lx + b)
+        model = sm.OLS(ly, lx)
+        res = model.fit()
+        if reg_details:
+            print(res.summary())
+        _, iv_l, iv_u = wls_prediction_std(res)
+        reg_line = 10**res.fittedvalues
+        reg_line_upper = 10**iv_u
+        reg_line_lower = 10**iv_l
     # No log
     else:
         mx = max(np.max(x), np.max(y))
         mn = min(np.min(x), np.min(y))
         mlim = (mn+(0.01*(int(mn)-1)), mx+(0.01*(int(mx)+1)))
         # Do the regression
-        m, b, r, p, _ = sts.linregress(x, y)
-        func = m*x + b
+        model = sm.OLS(y, x)
+        res = model.fit()
+        P = res.pvalues.tolist()[0]
+        if reg_details:
+            print(res.summary())
+        _, iv_l, iv_u = wls_prediction_std(res)
+        reg_line = res.fittedvalues
+        reg_line_upper = iv_u
+        reg_line_lower = iv_l
+
+    # Plot the regression on top
+    inf = '  {:.3} +/- {:.2}\n  P:   {:.2}\n  R2: {:.2}'.format(
+        res.params.tolist()[0], res.bse.tolist()[0],
+        res.pvalues.tolist()[0], res.rsquared
+    )
+    a.plot(x, reg_line, label=inf, alpha=0.8, zorder=10)
 
     # Density plot
     if density:
@@ -88,25 +120,34 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         x2, y2, z = x[idx], y[idx], z[idx]
         s = a.scatter(x2, y2, c=z, s=50,
                       cmap=sns.cubehelix_palette(8, as_cmap=True),
-                      edgecolor='', label=None, picker=True)
+                      edgecolor='', label=None, picker=True, zorder=2)
     else:
         # Plot the points as blue dots
         s = a.plot(x, y, 'o', color='b', label=None, picker=True)
+
+    if highlight is not None:
+        highlight = pd.Series(highlight).reset_index(drop=True)
+        x3 = pd.Series(x)[highlight]
+        y3 = pd.Series(y)[highlight]
+        a.plot(x3, y3, 'o', c=sns.xkcd_rgb['leaf green'], alpha=0.4,
+               label='  ' + highlight_label)
 
     if log_scale:
         a.loglog()
 
     # Plot a 1-1 line in the background
-    a.plot(mlim, mlim, '-', color='0.75')
+    a.plot(mlim, mlim, '-', color='0.75', zorder=1)
 
-    # Plot the regression line ober the top in green
-    a.plot(x, func, '-', color='g',
-           label='r2: {:.2}\np:  {:.2}'.format(r, p))
+    handles, _ = a.get_legend_handles_labels()
+    if add_text:
+        handles.append(mpatches.Patch(color='none',
+                                      label=add_text))
 
     a.legend(
+        handles=handles,
         loc=legend, fancybox=True, fontsize=13,
         handlelength=0, handletextpad=0
-    ).legendHandles[0].set_visible(False)
+    )#.legendHandles[0].set_visible(False)
 
     if labels is not None:
         # Label most different dots
@@ -122,10 +163,11 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
             else:
                 adjust_text(text, ax=a, text_from_points=True,
                             arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
-
-    if labels is None:
+    else:
         a.set_xlim(mlim)
         a.set_ylim(mlim)
+
+    a.fill_between(x, 10**iv_u, 10**iv_l, alpha=0.05, zorder=9)
 
     if log_scale == 'negative':
         a.invert_xaxis()
@@ -447,6 +489,7 @@ def _get_fig_ax(fig, ax):
         else:
             print('You must provide both fig and ax, not just one.')
             raise Exception('You must provide both fig and ax, not just one.')
+        return fig, ax
     else:
         return plt.subplots(figsize=(9,9))
 
