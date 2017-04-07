@@ -28,6 +28,125 @@ from adjustText import adjust_text
 ###############################################################################
 
 
+def distcomp(actual, theoretical, bins=500, ylabel=None, xlabel=None,
+             title=None, mn=None, mx=None, size=7, joint=True, returndf=False):
+    """Compare two vectors of different length by creating equal bins.
+
+    Uses the min(x,y) and max(x,y) (+/- 1%) to set the limit of the bins, and
+    then divides both x and y into an equal number of bins between those two
+    limits, ensuring that the bin starts and ends are identical for both
+    distributions. Bins are labelled by the center value of the bin.
+
+    Bins are then converted into frequencies allowing a sensical comparison of
+    the two distributions.
+
+    Finally, the two distributions are combined into a dataframe, labelled by
+    the xlabel and ylabel (if not provided, defaults used) and sorted by bin
+    index (not by highest frequency, which is the default).
+
+    This dataframe is then used to create a scatterplot. If joint is True, the
+    scatterplot also includes a histogram of the data on each axis.
+
+    Args:
+        actual (Series):  Series of actual data, will go on y-axis
+        theoretical:      Series of theoretical data, will go on x-axis
+        bins (int):       Number of bins to use for plotting, default 1000
+        {y/x}label (str): Optional label for y/x axis. y=Actual,
+                          x=Theretical
+        title (str):      Optional title for the whole plot
+        mn (float):       Optional lower bound for binning
+        mx (float):       Optional upper bound for binning
+        size (int):       A size to use for the figure, square is forced.
+        joint (bool):     Create a seaborn joint plot with histograms attached
+        returndf (bool):  Return a dataframe as well
+
+    Returns:
+        fig, ax, [df]: Figure and axes always returned, if joint is True, axes
+                       object will be a seaborn axgrid. If returndf is True, a
+                       DataFrame of bins is also returned.
+    """
+    x = theoretical
+    y = actual
+    if not mx:
+        mx = max(np.max(x), np.max(y))
+        mx += mx*0.01
+    if not mn:
+        mn = min(np.min(x), np.min(y))
+        mn -= mx*0.01
+    boundaries = np.linspace(mn, mx, bins, endpoint=True)
+    labels = [(boundaries[i]+boundaries[i+1])/2
+              for i in range(len(boundaries)-1)]
+
+    # Bin two series into equal bins
+    xb = pd.cut(x, bins=boundaries, labels=labels)
+    yb = pd.cut(y, bins=boundaries, labels=labels)
+
+    # Get value counts for each bin and sort by bin
+    xhist = xb.value_counts().sort_index()
+    yhist = yb.value_counts().sort_index()
+
+    # Normalize xalue counts by length of dist
+    xhist = xhist.apply(lambda i: i/len(xb))
+    yhist = yhist.apply(lambda i: i/len(yb))
+
+    # Sanity checks
+    assert len(xhist) == len(yhist)
+    assert xhist.index.to_series().tolist() == xhist.index.to_series().tolist()
+    assert round(xhist.sum()) == 1
+    assert round(yhist.sum()) == 1
+
+    # Make a DataFrame
+    df = pd.concat([xhist, yhist], axis=1)
+    xl, yl = df.columns
+    xl = xlabel if xlabel else xl
+    yl = ylabel if ylabel else yl
+    if not isinstance(xl, str):
+        xl = 'Theoretical'
+    if not isinstance(yl, str):
+        yl = 'Actual'
+    xl = xl + ' (freq)'
+    yl = yl + ' (freq)'
+    df.columns = [xl, yl]
+
+    # Make the plot a square
+    emin = min(np.min(xhist), np.min(yhist))
+    emax = max(np.max(xhist), np.max(yhist))
+    emin -= emax*0.1
+    emax += emax*0.1
+    lim = (emin, emax)
+
+    # Plot it
+    if joint:
+        axgrid = sns.jointplot(x=xl, y=yl, data=df, xlim=lim,
+                               ylim=lim, size=size)
+        fig = axgrid.fig
+        ax  = axgrid.ax_joint
+    else:
+        fig, ax = plt.subplots(figsize=(6,6))
+        df.plot(x=xl, y=yl, kind='scatter', ax=ax)
+
+    # Plot a 1-1 line in the background
+    ax.plot(lim, lim, '-', color='0.75', alpha=0.9, zorder=0.9)
+
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
+
+    if title:
+        fig.suptitle(title, fontsize=16)
+        plt.tight_layout()
+        if joint:
+            fig.subplots_adjust(top=0.95)
+        else:
+            fig.subplots_adjust(top=0.93)
+
+    ax = axgrid if joint else ax
+
+    if returndf:
+        return fig, ax, df
+    else:
+        return fig, ax
+
+
 def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
             ax=None, density=True, log_scale=False, legend='best',
             label_lim=10, shift_labels=False, highlight=None,
@@ -104,6 +223,7 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         res.pvalues.tolist()[0], res.rsquared
     )
     a.plot(x, reg_line, label=inf, alpha=0.8, zorder=10)
+    a.fill_between(x, 10**iv_u, 10**iv_l, alpha=0.05, interpolate=True, zorder=9)
 
     # Density plot
     if density:
@@ -166,8 +286,6 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
     else:
         a.set_xlim(mlim)
         a.set_ylim(mlim)
-
-    a.fill_between(x, 10**iv_u, 10**iv_l, alpha=0.05, zorder=9)
 
     if log_scale == 'negative':
         a.invert_xaxis()
