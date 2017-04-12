@@ -14,6 +14,7 @@ import pandas as pd
 import statsmodels.api as sm
 from statsmodels.sandbox.regression.predstd import wls_prediction_std
 
+from matplotlib import gridspec
 from matplotlib import pyplot as plt
 import matplotlib.patches as mpatches
 
@@ -28,36 +29,52 @@ from adjustText import adjust_text
 ###############################################################################
 
 
-def distcomp(actual, theoretical, bins=500, ylabel=None, xlabel=None,
-             title=None, mn=None, mx=None, size=7, joint=True, returndf=False):
+def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
+             ylabel=None, xlabel=None, title=None, size=7,
+             returndf=False):
     """Compare two vectors of different length by creating equal bins.
 
-    Uses the min(x,y) and max(x,y) (+/- 1%) to set the limit of the bins, and
-    then divides both x and y into an equal number of bins between those two
-    limits, ensuring that the bin starts and ends are identical for both
-    distributions. Bins are labelled by the center value of the bin.
+    If kind is qq, the plot is a simple Quantile-Quantile plot, if it is cum,
+    then the plot is a cumulative probability plot.
 
-    Bins are then converted into frequencies allowing a sensical comparison of
-    the two distributions.
+    There are three different formats:
+        simple is a single scatter plot of either the QQ or cumulative dist
+        joint includes the simple scatter plot, but also plots the contributing
+        univatiate distributions on the axes
+        column includes the scatter plot on the left and adds two independent
+        histograms in two plots in a second column on the right.
 
-    Finally, the two distributions are combined into a dataframe, labelled by
-    the xlabel and ylabel (if not provided, defaults used) and sorted by bin
-    index (not by highest frequency, which is the default).
+    We also add the Mann-Whitney U P-value for the *original distributions*,
+    pre-binning.
 
-    This dataframe is then used to create a scatterplot. If joint is True, the
-    scatterplot also includes a histogram of the data on each axis.
+    Cumulative probability is calculated like this:
+
+        Uses the min(x,y) and max(x,y) (+/- 1%) to set the limit of the bins,
+        and then divides both x and y into an equal number of bins between
+        those two limits, ensuring that the bin starts and ends are identical
+        for both distributions. Bins are labelled by the center value of the
+        bin.
+
+        Bins are then converted into frequencies, such that the sum of all
+        frequencies is 1. These frequencies are then converted to a cumulative
+        frequency, so that the final bin will always have a value of one.
+
 
     Args:
         actual (Series):  Series of actual data, will go on y-axis
         theoretical:      Series of theoretical data, will go on x-axis
         bins (int):       Number of bins to use for plotting, default 1000
+        kind (str):       qq: Plot a Q-Q plot
+                          cum: Plot a cumulative probability plot
+        style (str):      simple: Plot a simple scatter plot
+                          joint: Plot a scatter plot with univariate dists on
+                          each axis.
+                          column: Plot a scatter plot with univariate
+                          histograms, separately calculated, on the side.
         {y/x}label (str): Optional label for y/x axis. y=Actual,
                           x=Theretical
         title (str):      Optional title for the whole plot
-        mn (float):       Optional lower bound for binning
-        mx (float):       Optional upper bound for binning
         size (int):       A size to use for the figure, square is forced.
-        joint (bool):     Create a seaborn joint plot with histograms attached
         returndf (bool):  Return a dataframe as well
 
     Returns:
@@ -65,48 +82,90 @@ def distcomp(actual, theoretical, bins=500, ylabel=None, xlabel=None,
                        object will be a seaborn axgrid. If returndf is True, a
                        DataFrame of bins is also returned.
     """
+    if kind not in ['qq', 'cum']:
+        raise ValueError('kind must be one of qq or cum (cumulative)')
+    if style not in ['simple', 'joint', 'column', 'scatter']:
+        raise ValueError('style must be one of simple, joint, or colummn')
+    kind = 'simple' if kind == 'scatter' else kind
+
     x = theoretical
     y = actual
-    if not mx:
+
+    # Choose central plot type
+    if kind == 'qq':
+        cum = False
+        # We use percentiles, so get evenly spaced percentiles from 0% to 100%
+        q = np.linspace(0, 100, bins+1)
+        xhist = np.percentile(theoretical, q)
+        yhist = np.percentile(actual, q)
+
+    elif kind == 'cum':
+        cum = True
+        # Create bins
         mx = max(np.max(x), np.max(y))
         mx += mx*0.01
-    if not mn:
         mn = min(np.min(x), np.min(y))
         mn -= mx*0.01
-    boundaries = np.linspace(mn, mx, bins, endpoint=True)
-    labels = [(boundaries[i]+boundaries[i+1])/2
-              for i in range(len(boundaries)-1)]
+        boundaries = np.linspace(mn, mx, bins+1, endpoint=True)
+        labels = [(boundaries[i]+boundaries[i+1])/2
+                  for i in range(bins)]
 
-    # Bin two series into equal bins
-    xb = pd.cut(x, bins=boundaries, labels=labels)
-    yb = pd.cut(y, bins=boundaries, labels=labels)
+        # Bin two series into equal bins
+        xb = pd.cut(x, bins=boundaries, labels=labels)
+        yb = pd.cut(y, bins=boundaries, labels=labels)
 
-    # Get value counts for each bin and sort by bin
-    xhist = xb.value_counts().sort_index()
-    yhist = yb.value_counts().sort_index()
+        # Get value counts for each bin and sort by bin
+        xhist = xb.value_counts().sort_index(ascending=True)/len(xb)
+        yhist = yb.value_counts().sort_index(ascending=True)/len(yb)
 
-    # Normalize xalue counts by length of dist
-    xhist = xhist.apply(lambda i: i/len(xb))
-    yhist = yhist.apply(lambda i: i/len(yb))
+        # Make cumulative
+        for ser in [xhist, yhist]:
+            ttl = 0
+            for idx, val in ser.iteritems():
+                ttl += val
+                ser.loc[idx] = ttl
 
-    # Sanity checks
-    assert len(xhist) == len(yhist)
-    assert xhist.index.to_series().tolist() == xhist.index.to_series().tolist()
-    assert round(xhist.sum()) == 1
-    assert round(yhist.sum()) == 1
+        chisq = sts.chisquare(yhist, xhist)
 
-    # Make a DataFrame
-    df = pd.concat([xhist, yhist], axis=1)
-    xl, yl = df.columns
-    xl = xlabel if xlabel else xl
-    yl = ylabel if ylabel else yl
-    if not isinstance(xl, str):
-        xl = 'Theoretical'
-    if not isinstance(yl, str):
-        yl = 'Actual'
-    xl = xl + ' (freq)'
-    yl = yl + ' (freq)'
-    df.columns = [xl, yl]
+    # Create figure layout
+    if style == 'simple':
+        fig, ax = plt.subplots(figsize=(size,size))
+
+    elif style == 'joint':
+        # Create a jointgrid
+        sns.set_style('darkgrid')
+        gs = gridspec.GridSpec(2, 2, width_ratios=[5, 1], height_ratios=[1, 5])
+        fig = plt.figure(figsize=(size,size))
+        ax  = plt.subplot(gs[1, 0])
+        axt = plt.subplot(gs[0, 0], sharex=ax, yticks=[])
+        axr = plt.subplot(gs[1, 1], sharey=ax, xticks=[])
+        # Plot side plots
+        axt.hist(xhist, bins=bins, cumulative=cum)
+        axr.hist(yhist, bins=bins, cumulative=cum, orientation='horizontal')
+
+    elif style == 'column':
+        # Create a two column grid
+        fig = plt.figure(figsize=(size*2,size))
+        ax  = plt.subplot2grid((2,2), (0,0), rowspan=2)
+        ax2 = plt.subplot2grid((2,2), (0,1))
+        ax3 = plt.subplot2grid((2,2), (1,1), sharex=ax2, sharey=ax2)
+        # Plot extra plots - these ones are traditional histograms
+        sns.distplot(actual, ax=ax2, bins=bins)
+        sns.distplot(theoretical, ax=ax3, bins=bins)
+        ax2.set_title('Actual')
+        ax3.set_title('Theoretical')
+        for a in [ax2, ax3]:
+            a.set_frame_on(True)
+            a.set_xlabel = ''
+            a.axes.get_yaxis().set_visible(True)
+            a.yaxis.tick_right()
+            a.yaxis.set_label_position('right')
+            a.yaxis.set_label('count')
+
+    # Plot the scatter plot
+    ax.scatter(xhist, yhist, label='')
+    ax.set_xlabel('Theoretical')
+    ax.set_ylabel('Actual')
 
     # Make the plot a square
     emin = min(np.min(xhist), np.min(yhist))
@@ -114,42 +173,57 @@ def distcomp(actual, theoretical, bins=500, ylabel=None, xlabel=None,
     emin -= emax*0.1
     emax += emax*0.1
     lim = (emin, emax)
-
-    # Plot it
-    if joint:
-        axgrid = sns.jointplot(x=xl, y=yl, data=df, xlim=lim,
-                               ylim=lim, size=size)
-        fig = axgrid.fig
-        ax  = axgrid.ax_joint
-    else:
-        fig, ax = plt.subplots(figsize=(6,6))
-        df.plot(x=xl, y=yl, kind='scatter', ax=ax)
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
 
     # Plot a 1-1 line in the background
     ax.plot(lim, lim, '-', color='0.75', alpha=0.9, zorder=0.9)
 
-    ax.set_xlim(lim)
-    ax.set_ylim(lim)
+    # Add Mann-Whitney U p-value
+    mwu = sts.mannwhitneyu(actual, theoretical)
+    handles, _ = ax.get_legend_handles_labels()
+    prc, prp = sts.pearsonr(xhist, yhist)
+    if round(prc, 4) > 0.998:
+        plbl = 'pearsonr = {:.2f}; p = {:.2f}'
+    else:
+        plbl = 'pearsonr = {:.2}; p = {:.2e}'
+    handles.append(
+        mpatches.Patch(
+            color='none', label=plbl.format(prc, prp)
+        )
+    )
+    if mwu.pvalue < 0.001:
+        mwl = 'mannwhitneyu = {:.2e}'
+    else:
+        mwl = 'mannwhitneyu = {:.5f}'
+    handles.append(
+        mpatches.Patch(
+            color='none', label=mwl.format(mwu.pvalue)
+        )
+    )
+
+    ax.legend(handles=handles, loc=0)
+
+    fig.tight_layout()
 
     if title:
         fig.suptitle(title, fontsize=16)
-        plt.tight_layout()
-        if joint:
+        if kind == 'joint':
             fig.subplots_adjust(top=0.95)
         else:
             fig.subplots_adjust(top=0.93)
 
-    ax = axgrid if joint else ax
+    if style == 'joint':
+        ax = (ax, axt, axr)
+    elif style == 'column':
+        ax = (ax, ax2, ax3)
 
-    if returndf:
-        return fig, ax, df
-    else:
-        return fig, ax
+    return fig, ax
 
 
-def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
-            ax=None, density=True, log_scale=False, legend='best',
-            label_lim=10, shift_labels=False, highlight=None,
+def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
+            labels=None, fig=None, ax=None, density=True, log_scale=False,
+            legend='best', label_lim=10, shift_labels=False, highlight=None,
             highlight_label=None, add_text=None, reg_details=True):
     """Create a simple 1:1 scatter plot plus regression line.
 
@@ -166,6 +240,7 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         xlabel (str):    A label for the x axis
         ylabel (str):    A label for the y axis
         title (str):     Name of the plot
+        pval (float):    Draw a line at this point*point count
         labels (Series): Labels to show
         fig:             A pyplot figure
         ax:              A pyplot axes object
@@ -191,7 +266,9 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         ly = np.log10(y)
         mx = max(np.max(lx), np.max(ly))
         mn = min(np.min(lx), np.min(ly))
-        mlim = (10**(mn-1), 10**(mx+1))
+        mxs = 10**(mx+1)
+        mns = 10**(mn-1)
+        mlim = (mns, mxs)
         # Do the regression
         model = sm.OLS(ly, lx)
         res = model.fit()
@@ -218,12 +295,37 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         reg_line_lower = iv_l
 
     # Plot the regression on top
-    inf = '  {:.3} +/- {:.2}\n  P:   {:.2}\n  R2: {:.2}'.format(
+    inf = 'OLS: {:.3} +/- {:.2}\n    P: {:.2e}\n  $R^2$: {:.2}'.format(
         res.params.tolist()[0], res.bse.tolist()[0],
         res.pvalues.tolist()[0], res.rsquared
     )
     a.plot(x, reg_line, label=inf, alpha=0.8, zorder=10)
     a.fill_between(x, 10**iv_u, 10**iv_l, alpha=0.05, interpolate=True, zorder=9)
+
+    # Plot pval line
+    if pval:
+        pval = float(pval)
+        pval = pval/len(x)
+        a.plot(mlim, (pval, pval), color='0.5', alpha=0.3)
+        a.plot((pval, pval), mlim, color='0.6', alpha=0.5)
+        if log_scale == 'negative':
+            mxa = mx+1.25
+            tpos = 10**(mxa)
+        elif log_scale:
+            mna = mn-1.25
+            tpos = 10**(mna)
+        else:
+            tpos = mlim[0] - (mlim[0] * .1)
+        a.text(tpos, pval, 'p={:.1e}'.format(pval))
+        dr = pd.concat([pd.Series(x), pd.Series(y)], axis=1)
+        dr.columns = ['x', 'y']
+        dr = dr[(dr.x <= pval) | (dr.y <= pval)]
+        both = dr[(dr.x <= pval) & (dr.y <= pval)]
+        dr = dr[(dr.x <= pval) ^ (dr.y <= pval)]
+        a.plot(dr.x, dr.y, 'o', c=sns.xkcd_rgb['gold'], alpha=0.2,
+               label='goaway')
+        a.plot(both.x, both.y, 'o', c=sns.xkcd_rgb['lilac'], alpha=0.2,
+               label='goaway')
 
     # Density plot
     if density:
@@ -246,7 +348,7 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         s = a.plot(x, y, 'o', color='b', label=None, picker=True)
 
     if highlight is not None:
-        highlight = pd.Series(highlight).reset_index(drop=True)
+        highlight = pd.Series(highlight).tolist()
         x3 = pd.Series(x)[highlight]
         y3 = pd.Series(y)[highlight]
         a.plot(x3, y3, 'o', c=sns.xkcd_rgb['leaf green'], alpha=0.4,
@@ -258,16 +360,23 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
     # Plot a 1-1 line in the background
     a.plot(mlim, mlim, '-', color='0.75', zorder=1)
 
-    handles, _ = a.get_legend_handles_labels()
+    handles, labls = a.get_legend_handles_labels()
+    rm = []
+    for i, labl in enumerate(labls):
+        if labl == 'goaway':
+            rm.append(handles[i])
+    for rmthis in rm:
+        handles.remove(rmthis)
+
     if add_text:
         handles.append(mpatches.Patch(color='none',
                                       label=add_text))
 
     a.legend(
         handles=handles,
-        loc=legend, fancybox=True, fontsize=13,
+        loc=0, fancybox=True, fontsize=10,
         handlelength=0, handletextpad=0
-    )#.legendHandles[0].set_visible(False)
+    )
 
     if labels is not None:
         # Label most different dots
@@ -292,11 +401,14 @@ def scatter(x, y, xlabel, ylabel, title, labels=None, fig=None,
         a.invert_yaxis()
 
     # Set labels, title, and legend location
-    a.set_xlabel(xlabel, fontsize=15)
-    a.set_ylabel(ylabel, fontsize=15)
-    a.set_title(title, fontsize=20)
+    if xlabel:
+        a.set_xlabel(xlabel, fontsize=15)
+    if ylabel:
+        a.set_ylabel(ylabel, fontsize=15)
+    if title:
+        a.set_title(title, fontsize=20)
 
-    plt.xticks(rotation=30)
+    plt.xticks(rotation=0)
 
     return f, a
 
