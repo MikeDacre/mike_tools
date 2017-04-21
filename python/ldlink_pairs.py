@@ -315,6 +315,8 @@ def compare_two_variants(var1: str, var2: str, populations: list) -> SNP_Pair:
     Uses the LDpair API:
         https://analysistools.nci.nih.gov/LDlink/?tab=ldpair
 
+    Tries 10 times on error.
+
     Parameters
     ----------
     var1/var2 : str
@@ -333,14 +335,26 @@ def compare_two_variants(var1: str, var2: str, populations: list) -> SNP_Pair:
     if isinstance(populations, str):
         populations = [populations]
 
-    req = _get(
-        'https://analysistools.nci.nih.gov/LDlink/LDlinkRest/' +
-        'ldpair?var1={}&var2={}&pop={}'.format(
-            var1, var2, '%2B'.join(populations)
-        )
-    )
+    i = 10
+    while True:
+        try:
+            req = _get(
+                'https://analysistools.nci.nih.gov/LDlink/LDlinkRest/' +
+                'ldpair?var1={}&var2={}&pop={}'.format(
+                    var1, var2, '%2B'.join(populations)
+                )
+            )
+            out = SNP_Pair(req.read().decode())
+        except:
+            if not i:
+                print('Failed on {} {} {}'.format(var1, var2, populations))
+                raise
+            i -= 1
+            _sleep(SLEEP_TIME)
+            continue
+        break
 
-    return SNP_Pair(req.read().decode())
+    return out
 
 
 ###############################################################################
