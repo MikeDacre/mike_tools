@@ -30,11 +30,10 @@ from adjustText import adjust_text
 
 
 def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
-             ylabel=None, xlabel=None, title=None, size=7,
-             returndf=False):
+             ylabel=None, xlabel=None, title=None, size=7):
     """Compare two vectors of different length by creating equal bins.
 
-    If kind is qq, the plot is a simple Quantile-Quantile plot, if it is cum,
+    If kind is qq, the plot is a simple Quantile-Quantile plot, if it is pp,
     then the plot is a cumulative probability plot.
 
     There are three different formats:
@@ -75,21 +74,22 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
                           x=Theretical
         title (str):      Optional title for the whole plot
         size (int):       A size to use for the figure, square is forced.
-        returndf (bool):  Return a dataframe as well
 
     Returns:
-        fig, ax, [df]: Figure and axes always returned, if joint is True, axes
-                       object will be a seaborn axgrid. If returndf is True, a
-                       DataFrame of bins is also returned.
+        fig, ax: Figure and axes always returned, if joint is True, axes
+                 object will be a seaborn axgrid.
     """
-    if kind not in ['qq', 'cum']:
-        raise ValueError('kind must be one of qq or cum (cumulative)')
+    if kind not in ['qq', 'cum', 'pp']:
+        raise ValueError('kind must be one of qq or pp (cumulative)')
     if style not in ['simple', 'joint', 'column', 'scatter']:
         raise ValueError('style must be one of simple, joint, or colummn')
-    kind = 'simple' if kind == 'scatter' else kind
+    kind = 'cum' if kind == 'pp' else kind
+    style = 'simple' if style == 'scatter' else style
 
     x = theoretical
     y = actual
+
+    reg_pp = True  # If false, do a pp plot that is evenly spaced in the hist.
 
     # Choose central plot type
     if kind == 'qq':
@@ -102,13 +102,20 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
     elif kind == 'cum':
         cum = True
         # Create bins
-        mx = max(np.max(x), np.max(y))
-        mx += mx*0.01
-        mn = min(np.min(x), np.min(y))
-        mn -= mx*0.01
-        boundaries = np.linspace(mn, mx, bins+1, endpoint=True)
+        if reg_pp:
+            theoretical_sort = sorted(theoretical)
+            boundaries = theoretical_sort[::int(len(theoretical)/bins)]
+            if len(boundaries) < bins:
+                boundaries = theoretical_sort[::round(len(theoretical)/(bins+1))]
+            boundaries.append(theoretical_sort[-1])
+        else:
+            mx = max(np.max(x), np.max(y))
+            mx += mx*0.01
+            mn = min(np.min(x), np.min(y))
+            mn -= mx*0.01
+            boundaries = np.linspace(mn, mx, bins+1, endpoint=True)
         labels = [(boundaries[i]+boundaries[i+1])/2
-                  for i in range(bins)]
+                  for i in range(len(boundaries)-1)]
 
         # Bin two series into equal bins
         xb = pd.cut(x, bins=boundaries, labels=labels)
@@ -124,8 +131,6 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
             for idx, val in ser.iteritems():
                 ttl += val
                 ser.loc[idx] = ttl
-
-        chisq = sts.chisquare(yhist, xhist)
 
     # Create figure layout
     if style == 'simple':
@@ -164,8 +169,10 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
 
     # Plot the scatter plot
     ax.scatter(xhist, yhist, label='')
-    ax.set_xlabel('Theoretical')
-    ax.set_ylabel('Actual')
+    xlabel = xlabel if xlabel else 'Theoretical'
+    ylabel = ylabel if ylabel else 'Actual'
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
 
     # Make the plot a square
     emin = min(np.min(xhist), np.min(yhist))
@@ -180,7 +187,8 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
     ax.plot(lim, lim, '-', color='0.75', alpha=0.9, zorder=0.9)
 
     # Add Mann-Whitney U p-value
-    mwu = sts.mannwhitneyu(actual, theoretical)
+    mwu   = sts.mannwhitneyu(actual, theoretical)
+    chi = sts.chisquare(yhist, xhist)
     handles, _ = ax.get_legend_handles_labels()
     prc, prp = sts.pearsonr(xhist, yhist)
     if round(prc, 4) > 0.998:
@@ -192,13 +200,23 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
             color='none', label=plbl.format(prc, prp)
         )
     )
+    if kind == 'qq' or reg_pp:
+        if chi.pvalue < 0.001:
+            cpl = 'chisq = {:.2}; p = {:2e}'
+        else:
+            cpl = 'chisq = {:.2}; p = {:.2f}'
+        handles.append(
+            mpatches.Patch(
+                color='none', label=cpl.format(chi.statistic, chi.pvalue)
+            )
+        )
     if mwu.pvalue < 0.001:
-        mwl = 'mannwhitneyu = {:.2e}'
+        mwl = 'mannwhitneyu = {:.2}; p = {:.2e}'
     else:
-        mwl = 'mannwhitneyu = {:.5f}'
+        mwl = 'mannwhitneyu = {:.2}; p = {:.5f}'
     handles.append(
         mpatches.Patch(
-            color='none', label=mwl.format(mwu.pvalue)
+            color='none', label=mwl.format(mwu.statistic, mwu.pvalue)
         )
     )
 
@@ -212,6 +230,29 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
             fig.subplots_adjust(top=0.95)
         else:
             fig.subplots_adjust(top=0.93)
+
+    # Last thing is to set the xtick labels for cummulative plots
+    if kind == 'cum':
+        labels = [round(i, 2) for i in labels]
+        fig.canvas.draw()
+        xlabels = ax.get_xticklabels()
+        ylabels = ax.get_yticklabels()
+        for i, tlabels in enumerate([xlabels, ylabels]):
+            for tlabel in tlabels:
+                pos = tlabel.get_position()
+                if round(pos[i], 2) < 0.0 or round(pos[i], 2) > 1.0:
+                    tlabel.set_text('')
+                    continue
+                if round(pos[i], 2) == 0.00:
+                    txt = labels[0]
+                elif round(pos[i], 2) == 1.00:
+                    # The last label is the end of the bin, not the start
+                    txt = round(theoretical_sort[-1], 2)
+                else:
+                    txt = labels[int(round(len(labels)*pos[i]))]
+                tlabel.set_text(str(txt))
+        ax.set_xticklabels(xlabels)
+        ax.set_yticklabels(ylabels)
 
     if style == 'joint':
         ax = (ax, axt, axr)
