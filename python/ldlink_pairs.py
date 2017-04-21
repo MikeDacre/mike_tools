@@ -126,12 +126,12 @@ class SNP_Pair(object):
             self.dprime = float(self.dprime)
         except ValueError:
             self.dprime = _nan
-        self.rsquared = float(f[21].strip().split(':')[1].strip())
+        self.rsquared = f[21].strip().split(':')[1].strip()
         try:
             self.rsquared = float(self.dprime)
         except ValueError:
             self.rsquared = _nan
-        self.chisq = float(f[22].strip().split(':')[1].strip())
+        self.chisq = f[22].strip().split(':')[1].strip()
         try:
             self.chisq = float(self.dprime)
         except ValueError:
