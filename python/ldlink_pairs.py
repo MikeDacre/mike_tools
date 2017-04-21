@@ -14,6 +14,20 @@ License: MIT License, property of Stanford, use as you wish
 Created: 2017-21-21 10:04
 Version: 0.1a
 
+LDLink
+------
+https://analysistools.nci.nih.gov/LDlink
+https://github.com/CBIIT/nci-webtools-dceg-linkage
+
+This tool uses the above API entirely, thanks to Mitchell Machiela and the
+Chanock lab for writing that tool!
+
+Citation
+~~~~~~~~
+Machiela MJ, Chanock SJ. LDlink a web-based application for exploring
+population-specific haplotype structure and linking correlated alleles of
+possible functional variants. Bioinformatics. 2015 Jul 2. PMID: 26139635.
+
 Examples
 --------
 >>>snp = compare_two_variants('rs11121194', 'rs1884352', ['ESN'])
@@ -49,7 +63,39 @@ SLEEP_TIME = 1.0
 
 class SNP_Pair(object):
 
-    """Association information from a pair of SNPs, created from LDpair."""
+    """Association information from a pair of SNPs, created from LDpair.
+
+    Attributes
+    ----------
+    snp1 : str
+    snp2 : str
+    chrom :  str
+    loc1 : int
+        Position of snp1 on chromosome
+    loc2 : int
+        Position of snp1 on chromosome
+    populations : list
+        List of 1000genomes populations
+    table : pandas.DataFrame
+        Pandas DataFrame of allele counts for both SNPs in the above
+        populations. Rows are snp1, columns are snp2. Multiindexed.
+    dprime : float
+    rsquared : float
+    chisq : float
+    p : float
+    p_str : str
+        String representation of the p-value
+    alleles : dict
+        Dictionary of alleles by snp
+    lookup : dict
+        Dictionary of allele in other SNP given an allele in one SNP.
+
+    Methods
+    -------
+    lookup_other(self, snp, allele)
+        Get the allele of a SNP given an allele in the other SNP.
+
+    """
 
     def __init__(self, x):
         """Parse an input string from LDpair."""
@@ -109,12 +155,17 @@ class SNP_Pair(object):
     def lookup_other(self, snp, allele):
         """Return the linked allele for a given snp.
 
-        Args:
-            snp (int, str): Either 1, 2 for SNP 1/2 or rsID.
-            allele (str):   The allele for snp.
+        Parameters
+        ----------
+        snp : int_or_str
+            Either 1, 2 for SNP 1/2 or rsID.
+        allele :str
+            The allele for snp.
 
-        Returns:
-            str: Linked allele for other SNP.
+        Returns
+        -------
+        str
+            Linked allele for other SNP.
         """
         if isinstance(snp, int):
             if snp == 1:
