@@ -52,6 +52,7 @@ from time import sleep as _sleep
 from urllib.request import urlopen as _get
 
 import pandas as _pd
+from numpy import nan as _nan
 
 SLEEP_TIME = 1.0
 
@@ -74,17 +75,17 @@ class SNP_Pair(object):
         Position of snp1 on chromosome
     loc2 : int
         Position of snp1 on chromosome
+    dprime : float_or_nan
+    rsquared : float_or_nan
+    chisq : float_or_nan
+    p : float_or_nan
+    p_str : str
+        String representation of the p-value
     populations : list
         List of 1000genomes populations
     table : pandas.DataFrame
         Pandas DataFrame of allele counts for both SNPs in the above
         populations. Rows are snp1, columns are snp2. Multiindexed.
-    dprime : float
-    rsquared : float
-    chisq : float
-    p : float
-    p_str : str
-        String representation of the p-value
     alleles : dict
         Dictionary of alleles by snp
     lookup : dict
@@ -120,11 +121,26 @@ class SNP_Pair(object):
             columns=cols, index=indx
         )
 
-        self.dprime = float(f[20].strip().split(':')[1].strip())
+        self.dprime = f[20].strip().split(':')[1].strip()
+        try:
+            self.dprime = float(self.dprime)
+        except ValueError:
+            self.dprime = _nan
         self.rsquared = float(f[21].strip().split(':')[1].strip())
+        try:
+            self.rsquared = float(self.dprime)
+        except ValueError:
+            self.rsquared = _nan
         self.chisq = float(f[22].strip().split(':')[1].strip())
+        try:
+            self.chisq = float(self.dprime)
+        except ValueError:
+            self.chisq = _nan
         p = f[23].strip().split(':')[1].strip()
-        self.p = 0.0 if p == '<0.0001' else float(p)
+        try:
+            self.p = 0.0 if p == '<0.0001' else float(p)
+        except ValueError:
+            self.p = _nan
         self.p_str = p
 
         s1a, a1a, s2a, a2a = correlation_lookup.findall(f[25])[0]
