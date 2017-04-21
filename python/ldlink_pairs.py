@@ -30,6 +30,9 @@ possible functional variants. Bioinformatics. 2015 Jul 2. PMID: 26139635.
 
 Examples
 --------
+
+SNPs in LD
+~~~~~~~~~~
 >>>snp = compare_two_variants('rs11121194', 'rs1884352', ['ESN'])
 
 >>>snp
@@ -43,11 +46,28 @@ SNP_Pair<rs11121194(['C', 'T']:rs1884352(['G', 'A']) R2: 0.9222 (P: <0.0001)>
 
 >>>snp.lookup_other('rs11121194', 'C')
 'G'
+
+>>>snp.inld
+True
+
+SNPs not in LD
+~~~~~~~~~~~~~~
+>>>snp2 = compare_two_variants('rs75830605', 'rs77977823', ['CEU'])
+
+>>>snp2.inld
+False
+
+>>>snp2.lookup
+{}
+
+>>>snp2.lookup_other('rs77977823', 'C') # Prints error message to STDERR
+None
 ===============================================================================
 """
 __version__ = '0.1a'
 
 import re as _re
+import sys as _sys
 from time import sleep as _sleep
 from urllib.request import urlopen as _get
 
@@ -68,6 +88,8 @@ class SNP_Pair(object):
 
     Attributes
     ----------
+    inld : bool
+        True if SNPs are in LD, False if SNPs are in Linkage Equilibrium.
     snp1 : str
     snp2 : str
     chrom :  str
@@ -120,6 +142,9 @@ class SNP_Pair(object):
              [int(i3), int(i4)]],
             columns=cols, index=indx
         )
+        self.snp1_alleles = [s1, s2]
+        self.snp2_alleles = snps
+        self.alleles = {self.snp1: self.snp1_alleles, self.snp2: self.snp2_alleles}
 
         self.dprime = f[20].strip().split(':')[1].strip()
         try:
@@ -143,30 +168,32 @@ class SNP_Pair(object):
             self.p = _nan
         self.p_str = p
 
-        s1a, a1a, s2a, a2a = correlation_lookup.findall(f[25])[0]
-        s1b, a1b, s2b, a2b = correlation_lookup.findall(f[26])[0]
-        a1a = a1a.upper()
-        a1b = a1b.upper()
-        a2a = a2a.upper()
-        a2b = a2b.upper()
-        assert s1a == self.snp1
-        assert s1b == self.snp1
-        assert s2a == self.snp2
-        assert s2b == self.snp2
-        self.snp1_alleles = [a1a, a1b]
-        self.snp2_alleles = [a2a, a2b]
-        self.alleles = {self.snp1: self.snp1_alleles, self.snp2: self.snp2_alleles}
+        if f[25].strip().endswith('are in linkage equilibrium'):
+            self.lookup = {}
+            self.inld = False
+        else:
+            self.inld = True
+            s1a, a1a, s2a, a2a = correlation_lookup.findall(f[25])[0]
+            s1b, a1b, s2b, a2b = correlation_lookup.findall(f[26])[0]
+            a1a = a1a.upper()
+            a1b = a1b.upper()
+            a2a = a2a.upper()
+            a2b = a2b.upper()
+            assert s1a == self.snp1
+            assert s1b == self.snp1
+            assert s2a == self.snp2
+            assert s2b == self.snp2
 
-        self.lookup = {
-            self.snp1: {
-                a1a: a2a,
-                a1b: a2b,
-            },
-            self.snp2: {
-                a2a: a1a,
-                a2b: a1b,
-            },
-        }
+            self.lookup = {
+                self.snp1: {
+                    a1a: a2a,
+                    a1b: a2b,
+                },
+                self.snp2: {
+                    a2a: a1a,
+                    a2b: a1b,
+                },
+            }
 
     def lookup_other(self, snp, allele):
         """Return the linked allele for a given snp.
@@ -180,9 +207,19 @@ class SNP_Pair(object):
 
         Returns
         -------
-        str
-            Linked allele for other SNP.
+        str_or_None
+            Linked allele for other SNP, unless not in LD.
+
+        Raises
+        ------
+        ValueError
+            If snp or allele contain non-permitted values.
         """
+        if not self.inld:
+            print('Cannot lookup allele, SNPs in linkage equilibrium.',
+                  file=_sys.stderr)
+            return
+
         if isinstance(snp, int):
             if snp == 1:
                 snp = self.snp1
