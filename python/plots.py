@@ -265,7 +265,8 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
 def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             labels=None, fig=None, ax=None, density=True, log_scale=False,
             legend='best', label_lim=10, shift_labels=False, highlight=None,
-            highlight_label=None, add_text=None, reg_details=True):
+            highlight_label=None, add_text=None, reg_details=True,
+            regression=True):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
@@ -293,6 +294,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         shift_labels:    If True, try to spread labels out. Imperfect.
         highlight_label (Series): Boolean series of same len as x/y
         reg_details (bool): Print regression summary
+        regression (bool): Do a regression
 
 
     Returns:
@@ -311,37 +313,40 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         mns = 10**(mn-1)
         mlim = (mns, mxs)
         # Do the regression
-        model = sm.OLS(ly, lx)
-        res = model.fit()
-        if reg_details:
-            print(res.summary())
-        _, iv_l, iv_u = wls_prediction_std(res)
-        reg_line = 10**res.fittedvalues
-        reg_line_upper = 10**iv_u
-        reg_line_lower = 10**iv_l
+        if regression:
+            model = sm.OLS(ly, lx)
+            res = model.fit()
+            if reg_details:
+                print(res.summary())
+            _, iv_l, iv_u = wls_prediction_std(res)
+            reg_line = 10**res.fittedvalues
+            reg_line_upper = 10**iv_u
+            reg_line_lower = 10**iv_l
     # No log
     else:
         mx = max(np.max(x), np.max(y))
         mn = min(np.min(x), np.min(y))
         mlim = (mn+(0.01*(int(mn)-1)), mx+(0.01*(int(mx)+1)))
         # Do the regression
-        model = sm.OLS(y, x)
-        res = model.fit()
-        P = res.pvalues.tolist()[0]
-        if reg_details:
-            print(res.summary())
-        _, iv_l, iv_u = wls_prediction_std(res)
-        reg_line = res.fittedvalues
-        reg_line_upper = iv_u
-        reg_line_lower = iv_l
+        if regression:
+            model = sm.OLS(y, x)
+            res = model.fit()
+            P = res.pvalues.tolist()[0]
+            if reg_details:
+                print(res.summary())
+            _, iv_l, iv_u = wls_prediction_std(res)
+            reg_line = res.fittedvalues
+            reg_line_upper = iv_u
+            reg_line_lower = iv_l
 
     # Plot the regression on top
-    inf = 'OLS: {:.3} +/- {:.2}\n    P: {:.2e}\n  $R^2$: {:.2}'.format(
-        res.params.tolist()[0], res.bse.tolist()[0],
-        res.pvalues.tolist()[0], res.rsquared
-    )
-    a.plot(x, reg_line, label=inf, alpha=0.8, zorder=10)
-    a.fill_between(x, 10**iv_u, 10**iv_l, alpha=0.05, interpolate=True, zorder=9)
+    if regression:
+        inf = 'OLS: {:.3} +/- {:.2}\n    P: {:.2e}\n  $R^2$: {:.2}'.format(
+            res.params.tolist()[0], res.bse.tolist()[0],
+            res.pvalues.tolist()[0], res.rsquared
+        )
+        a.plot(x, reg_line, label=inf, alpha=0.8, zorder=10)
+        a.fill_between(x, 10**iv_u, 10**iv_l, alpha=0.05, interpolate=True, zorder=9)
 
     # Plot pval line
     if pval:
@@ -377,16 +382,25 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             i = x
             j = y
         xy = np.vstack([i, j])
-        z = gaussian_kde(xy)(xy)
-        # Sort the points by density, so that the densest points are plotted last
-        idx = z.argsort()
-        x2, y2, z = x[idx], y[idx], z[idx]
-        s = a.scatter(x2, y2, c=z, s=50,
-                      cmap=sns.cubehelix_palette(8, as_cmap=True),
-                      edgecolor='', label=None, picker=True, zorder=2)
+        try:
+            z = gaussian_kde(xy)(xy)
+            # Sort the points by density, so that the densest points are
+            # plotted last
+            idx = z.argsort()
+            x2, y2, z = x[idx], y[idx], z[idx]
+            s = a.scatter(x2, y2, c=z, s=50,
+                          cmap=sns.cubehelix_palette(8, as_cmap=True),
+                          edgecolor='', label=None, picker=True, zorder=2)
+        except np.linalg.linalg.LinAlgError:
+            # Too small for density
+            s = a.scatter(x, y,
+                          cmap=sns.cubehelix_palette(8, as_cmap=True),
+                          edgecolor='', label=None, picker=True, zorder=2)
     else:
         # Plot the points as blue dots
-        s = a.plot(x, y, 'o', color='b', label=None, picker=True)
+        s = a.scatter(x, y,
+                      cmap=sns.cubehelix_palette(8, as_cmap=True),
+                      edgecolor='', label=None, picker=True, zorder=2)
 
     if highlight is not None:
         highlight = pd.Series(highlight).tolist()
