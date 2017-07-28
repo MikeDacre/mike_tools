@@ -1,6 +1,10 @@
 """
 Functions to easily run shell commands.
 """
+import os
+import bz2
+import gzip
+import subprocess
 
 
 def run(command, raise_on_error=False):
@@ -19,12 +23,12 @@ def run(command, raise_on_error=False):
     stderr : str
     exit_code : int
     """
-    pp = _sub.Popen(command, shell=True, universal_newlines=True,
-                    stdout=_sub.PIPE, stderr=_sub.PIPE)
+    pp = subprocess.Popen(command, shell=True, universal_newlines=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out, err = pp.communicate()
     code = pp.returncode
     if raise_on_error and code != 0:
-        raise _sub.CalledProcessError(
+        raise subprocess.CalledProcessError(
             returncode=code, cmd=command, output=out, stderr=err
         )
     return out.decode(), err.decode(), code
@@ -48,8 +52,7 @@ def open_zipped(infile, mode='r'):
         if infile.endswith('.bz2'):
             if hasattr(bz2, 'open'):
                 return bz2.open(infile, mode)
-            else:
-                return bz2.BZ2File(infile, mode)
+            return bz2.BZ2File(infile, mode)
         return open(infile, mode)
 
 
@@ -68,7 +71,6 @@ def count_lines(infile, force_blocks=False):
     Uses `wc` if avaialable, otherwise does a rapid read.
     """
     if which('wc') and not force_blocks:
-        _logme.log('Using wc', 'debug')
         if infile.endswith('.gz'):
             cat = 'zcat'
         elif infile.endswith('.bz2'):
@@ -78,9 +80,8 @@ def count_lines(infile, force_blocks=False):
         command = "{cat} {infile} | wc -l | awk '{{print $1}}'".format(
             cat=cat, infile=infile
         )
-        return int(cmd(command)[1])
+        return int(run(command)[0])
     else:
-        _logme.log('Using block read', 'debug')
         with open_zipped(infile) as fin:
             return sum(bl.count("\n") for bl in block_read(fin))
 
@@ -101,7 +102,6 @@ def split_file(infile, parts, outpath='', keep_header=False):
         list: Paths to split files.
     """
     # Determine how many reads will be in each split sam file.
-    _logme.log('Getting line count', 'debug')
 
     num_lines = int(count_lines(infile)/int(parts)) + 1
 
@@ -109,12 +109,11 @@ def split_file(infile, parts, outpath='', keep_header=False):
     cnt       = 0
     currjob   = 1
     suffix    = '.split_' + str(currjob).zfill(4) + '.' + infile.split('.')[-1]
-    file_name = _os.path.basename(infile)
-    run_file  = _os.path.join(outpath, file_name + suffix)
+    file_name = os.path.basename(infile)
+    run_file  = os.path.join(outpath, file_name + suffix)
     outfiles  = [run_file]
 
     # Actually split the file
-    _logme.log('Splitting file', 'debug')
     with open_zipped(infile) as fin:
         header = fin.readline() if keep_header else ''
         sfile = open_zipped(run_file, 'w')
@@ -129,19 +128,18 @@ def split_file(infile, parts, outpath='', keep_header=False):
                 currjob += 1
                 suffix = '.split_' + str(currjob).zfill(4) + '.' + \
                     infile.split('.')[-1]
-                run_file = _os.path.join(outpath, file_name + suffix)
+                run_file = os.path.join(outpath, file_name + suffix)
                 sfile = open_zipped(run_file, 'w')
                 outfiles.append(run_file)
                 sfile.write(header)
                 cnt = 0
         sfile.close()
-    _logme.log('Split files: {}'.format(outfiles), 'debug')
     return tuple(outfiles)
 
 
 def is_exe(fpath):
     """Return True is fpath is executable."""
-    return _os.path.isfile(fpath) and _os.access(fpath, _os.X_OK)
+    return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
 
 
 def file_type(infile):
@@ -183,16 +181,16 @@ def which(program):
     Returns:
         Path to the program or None on failu_re.
     """
-    fpath, program = _os.path.split(program)
+    fpath, program = os.path.split(program)
     if fpath:
         if is_exe(program):
-            return _os.path.abspath(program)
+            return os.path.abspath(program)
     else:
-        for path in _os.environ["PATH"].split(_os.pathsep):
+        for path in os.environ["PATH"].split(os.pathsep):
             path = path.strip('"')
-            exe_file = _os.path.join(path, program)
+            exe_file = os.path.join(path, program)
             if is_exe(exe_file):
-                return _os.path.abspath(exe_file)
+                return os.path.abspath(exe_file)
 
     return None
 
@@ -200,8 +198,21 @@ def which(program):
 def check_pid(pid):
     """Check For the existence of a unix pid."""
     try:
-        _os.kill(pid, 0)
+        os.kill(pid, 0)
     except OSError:
         return False
     else:
         return True
+
+
+def listify(iterable):
+    """Try to force any iterable into a list sensibly."""
+    if isinstance(iterable, list):
+        return iterable
+    if isinstance(iterable, (str, int, float)):
+        return [iterable]
+    if not iterable:
+        return []
+    if callable(iterable):
+        iterable = iterable()
+    return list(iter(iterable))
