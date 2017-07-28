@@ -53,8 +53,7 @@ import dill as _pickle
 from tqdm import tqdm, tqdm_notebook
 
 import numpy as np
-import scipy as sp
-import scipy.stats as sts
+from scipy import stats as sts
 import pandas as pd
 
 import fyrd as _fyrd
@@ -130,40 +129,51 @@ def analyze_depict(sample_1, sample_2, prefix, cores=None, perms=100,
     print('Submitting main DEPICT job to cluster')
     if not cores:
         cores = PARAM_NCORES
-    job = _fyrd.Job(run_parse_depict,
-                    (sample_1, sample_2, prefix, cores, run_path, depict_path),
-                    name = 'main_DEPICT',
-                    cores = cores*2,
-                    mem = '12GB',
-                    scriptpath = run_path,
-                    outpath = run_path,
-                    runpath = run_path,
-                    **fyrd_args)
-    job.submit()
-    print('Job submitted.')
+    run_path = _os.path.abspath(run_path)
+    if not _os.path.isdir(run_path):
+        _os.mkdir(run_path)
 
-    print('Run permutations')
-    pgenes, ptissues = permute_depict(sample_1, sample_2, prefix, cores, perms,
-                                      run_path, depict_path, **fyrd_args)
-    pgenes.to_pickle('pgenes.bak')
-    ptissues.to_pickle('ptissues.bak')
+    startdir = _os.path.abspath(_os.path.curdir)
 
-    print('Permutations complete, getting main output')
+    try:
+        job = _fyrd.Job(run_parse_depict,
+                        (sample_1, sample_2, prefix, cores, run_path, depict_path),
+                        name = 'main_DEPICT',
+                        cores = cores*2,
+                        mem = '12GB',
+                        scriptpath = run_path,
+                        outpath = run_path,
+                        runpath = run_path,
+                        **fyrd_args)
+        job.submit()
+        print('Job submitted.')
 
-    genes, tissues = job.get()
+        print('Run permutations')
+        pgenes, ptissues = permute_depict(sample_1, sample_2, prefix, cores, perms,
+                                        run_path, depict_path, **fyrd_args)
+        pgenes.to_pickle('pgenes.bak')
+        ptissues.to_pickle('ptissues.bak')
 
-    genes.to_pickle('genes.bak')
-    tissues.to_pickle('tissues.bak')
+        print('Permutations complete, getting main output')
 
-    print('Main job completed successfully, DataFrames saved.')
+        genes, tissues = job.get()
 
-    data = {'genes': genes, 'tissues': tissues,
-            'pgenes': pgenes, 'ptissues': ptissues}
+        genes.to_pickle('genes.bak')
+        tissues.to_pickle('tissues.bak')
 
-    with open(prefix + '_completed_dfs.pickle', 'wb') as fout:
-        _pickle.dump(data, fout)
+        print('Main job completed successfully, DataFrames saved.')
 
-    return genes, tissues, pgenes, ptissues
+        data = {'genes': genes, 'tissues': tissues,
+                'pgenes': pgenes, 'ptissues': ptissues}
+
+        with open(prefix + '_completed_dfs.pickle', 'wb') as fout:
+            _pickle.dump(data, fout)
+
+        data = examine_data(**data)
+    finally:
+        _os.chdir(startdir)
+
+    return data
 
 
 def examine_data(genes, tissues, pgenes, ptissues,
@@ -181,30 +191,13 @@ def examine_data(genes, tissues, pgenes, ptissues,
                'perm_tissues': ptissues, (DF)
                'perm_genes_pivot': pg, (DF)
                'perm_tissues_pivot': pt (DF)}
-
-        , dfs: dictionary with comparison data and a modified version
-                   of the four input DFs.
     """
-    # Names
-    s1p = sample_1_name + '_p_value'
-    s2p = sample_2_name + '_p_value'
-    s1f = sample_1_name + '_FDR_lt_0.05'
-    s2f = sample_2_name + '_FDR_lt_0.05'
-
-    genes, tissues = merge_data(genes, tissues, False,
-                                sample_1_name, sample_2_name)
-    pgenes, ptissues = merge_data(pgenes, ptissues, True,
-                                  sample_1_name, sample_2_name)
-
     data = {'genes': {}, 'tissues': {}}
 
     print('Comparing the gene set pvalues to the permuted version.')
-    gm = sts.mannwhitneyu(genes.pdiff, pgenes.pdiff)
-    gm2 = sts.mannwhitneyu(genes.pldiff, pgenes.pldiff)
+    gm = sts.mannwhitneyu(genes.pldiff, pgenes.pldiff)
     data['genes']['mannwhitney'] = gm
     data['genes']['mannw_p'] = gm.pvalue
-    data['genes']['mannwhitney_log'] = gm2
-    data['genes']['mannw_p_log'] = gm2.pvalue
 
     # Pivot table based on absolute difference of the log10 of sample1/2
     pg = pgenes.pivot_table(
@@ -222,29 +215,26 @@ def examine_data(genes, tissues, pgenes, ptissues,
     genes['beats_perm'] = genes['pldiff'] > genes['max_log_p_diff_perms']
     genes['beats_perm95'] = genes['pldiff'] > genes['p95_log_p_diff_perms']
 
-    # Pivot table of pvalues
-    pgp = pgenes.pivot_table(
-        index='gene_set_ID', columns='perm', values='open_p_value'
-    )
-    pgp = add_data_to_perm_pivot(pgp)
-
     print('Comparing the tissue set pvalues to the permuted version.')
-    tm = sts.mannwhitneyu(tissues.pdiff, ptissues.pdiff)
-    tm2 = sts.mannwhitneyu(tissues.pldiff, ptissues.pldiff)
+    tm = sts.mannwhitneyu(tissues.pldiff, ptissues.pldiff)
     data['tissues']['mannwhitney'] = tm
     data['tissues']['mannw_p'] = tm.pvalue
-    data['tissues']['mannwhitney_log'] = tm2
-    data['tissues']['mannw_p_log'] = tm2.pvalue
 
     # Pivot table based on absolute difference of the log10 of sample1/2
     pt = ptissues.pivot_table(
         index='MeSH_term', columns='perm', values='pldiff'
     )
     pt = add_data_to_perm_pivot(pt)
-    tissues = pd.merge(tissues, pt[['MeSH_term', 'max', '95th_percentile']],
+
+    tissues = pd.merge(tissues, pt[['MeSH_term', 'max', 'median', 'mean',
+                                    '95th_percentile']],
                        on='MeSH_term')
-    tissues = tissues.rename(columns={'max': 'max_log_p_diff_perms',
-                                      '95th_percentile': 'p95_log_p_diff_perms'})
+    tissues = tissues.rename(
+        columns={'max': 'max_log_p_diff_perms',
+                 'median': 'median_log_p_diff_perms',
+                 'mean': 'mean_log_p_diff_perms',
+                 '95th_percentile': 'p95_log_p_diff_perms'}
+    )
     tissues['beats_perm'] = tissues['pldiff'] > tissues['max_log_p_diff_perms']
     tissues['beats_perm95'] = tissues['pldiff'] > tissues['p95_log_p_diff_perms']
 
@@ -264,11 +254,11 @@ def add_data_to_perm_pivot(df):
     # Sort permutations
     df = df[[str(j) for j in sorted([int(i) for i in df.columns])]].copy()
     # Basic summary stats
-    dfmin = df.apply(np.min, axis=1)
-    dfmax = df.apply(np.max, axis=1)
-    dfmean = df.apply(np.mean, axis=1)
+    dfmin    = df.apply(np.min, axis=1)
+    dfmax    = df.apply(np.max, axis=1)
+    dfmean   = df.apply(np.mean, axis=1)
     dfmedian = df.apply(np.median, axis=1)
-    ptl95 = df.apply(np.percentile, args=(95,), axis=1)
+    ptl95    = df.apply(np.percentile, args=(95,), axis=1)
     df['min'], df['max'], df['mean'] = dfmin, dfmax, dfmean
     df['median'], df['95th_percentile'] = dfmedian, ptl95
     df.reset_index(drop=False, inplace=True)
@@ -296,19 +286,19 @@ def merge_data(genes, tissues, handle_perm=False,
 
     # Create intersected tables
     genes = pd.merge(
-        genes[genes['sample'] == 'sample_1'].rename(
+        genes[genes['sample'] == sample_1_name].rename(
             columns={'p_value': s1p, 'FDR_lt_0.05': s1f }
         ).drop('sample', axis=1),
-        genes[genes['sample'] == 'sample_2'].rename(
+        genes[genes['sample'] == sample_2_name].rename(
             columns={'p_value': s2p, 'FDR_lt_0.05': s2f}
         ).drop(['gene_set_description', 'sample'], axis=1),
         on=gs
     )
     tissues = pd.merge(
-        tissues[tissues['sample'] == 'sample_1'].rename(
+        tissues[tissues['sample'] == sample_1_name].rename(
             columns={'p_value': s1p, 'FDR_lt_0.05': s1f }
         ).drop('sample', axis=1),
-        tissues[tissues['sample'] == 'sample_2'].rename(
+        tissues[tissues['sample'] == sample_2_name].rename(
             columns={'p_value': s2p, 'FDR_lt_0.05': s2f}
         ).drop(
             ['MeSH_first_level_term', 'MeSH_second_level_term',
@@ -367,7 +357,65 @@ def run_parse_depict(sample_1, sample_2, prefix, cores=None,
     genes = pd.concat(genes).sort_values('sample').reset_index(drop=True)
     tissues = pd.concat(tissues).sort_values('sample').reset_index(drop=True)
 
-    return genes, tissues
+    return merge_data(genes, tissues)
+
+
+def parse_completed(sample_1_name, sample_2_name, path,
+                    sample_1_prefix='sample_1', sample_2_prefix='sample_2'):
+    """Return merged gene and tissue dataframes from a directory.
+
+    Parameters
+    ----------
+    sample_1_name : str
+        The prefix used in the file naming when DEPICT was run
+    sample_2_name : str
+    path : str
+        The path to the directory to parse
+    sample_1_prefix : str, optional
+        A name to give the first sample
+    sample_2_prefix : str, optional
+
+    Returns
+    -------
+    genes : DataFrame
+    tissues : DataFrame
+    """
+    s1 = _os.path.abspath(_os.path.join(path, sample_1_name))
+    s2 = _os.path.abspath(_os.path.join(path, sample_2_name))
+    s1g = s1 + '_genesetenrichment.txt'
+    s2g = s2 + '_genesetenrichment.txt'
+    s1t = s1 + '_tissueenrichment.txt'
+    s2t = s2 + '_tissueenrichment.txt'
+    genes = pd.concat(
+        [
+            parse_gene_file(s1g, {'sample': sample_1_prefix}),
+            parse_gene_file(s2g, {'sample': sample_2_prefix})
+        ]
+    ).sort_values('sample').reset_index(drop=True)
+    tissues = pd.concat(
+        [
+            parse_tissue_file(s1t, {'sample': sample_1_prefix}),
+            parse_tissue_file(s2t, {'sample': sample_2_prefix})
+        ]
+    ).sort_values('sample').reset_index(drop=True)
+
+    return merge_data(genes, tissues,
+                      sample_1_name=sample_1_prefix,
+                      sample_2_name=sample_2_prefix)
+
+
+def parse_depict(datafiles):
+    genes = []
+    tissues = []
+    for sample, files in datafiles.items():
+        genes.append(parse_gene_file(files['gene'], {'sample': sample}))
+        tissues.append(parse_tissue_file(files['tissue'], {'sample': sample}))
+
+    # Increase sanity
+    genes = pd.concat(genes).sort_values('sample').reset_index(drop=True)
+    tissues = pd.concat(tissues).sort_values('sample').reset_index(drop=True)
+
+    return merge_data(genes, tissues)
 
 
 ###############################################################################
@@ -420,12 +468,23 @@ def _permute_depict(datafiles):
     genes = []
     tissues = []
     for name, samples in datafiles.items():
-        perm = name.split('_')[-1]
+        if isinstance(samples, tuple) or samples is None:
+            continue
+        perm = int(name.split('_')[-1])
+        g = []
+        t = []
         for sample, files in samples.items():
-            genes.append(parse_gene_file(files['gene'],
-                                         {'perm': perm, 'sample': sample}))
-            tissues.append(parse_tissue_file(files['tissue'],
-                                             {'perm': perm, 'sample': sample}))
+            g.append(parse_gene_file(files['gene'],
+                                     {'perm': perm, 'sample': sample}))
+            t.append(parse_tissue_file(files['tissue'],
+                                       {'perm': perm, 'sample': sample}))
+        g = pd.concat(g)
+        t = pd.concat(t)
+        g, t = merge_data(g, t, handle_perm=True)
+        if len(g) > 0:
+            genes.append(g)
+        if len(t) > 0:
+            tissues.append(t)
 
     # Merge data
     genes   = pd.concat(genes)
@@ -436,6 +495,75 @@ def _permute_depict(datafiles):
     tissues = tissues.sort_values(['perm', 'sample']).reset_index(drop=True)
 
     return genes, tissues
+
+
+def get_gene_perms(df, path, prefix, open_file, closed_file):
+    """Use file and path info to get permutations and create combined data.
+
+    Note: Not used in the primary workflow of this script, provided, like
+    rescue_permutation as a recovery and analysis tool.
+
+    Parameters
+    ----------
+    df : DataFrame
+        A genes DataFrame that has already been fully merged and has pldiff
+        info
+    path : str
+        Path to the permutations
+    prefix : str
+        Prefix used when running permutations
+    open_file : str
+        Prefix of the open file (excluding permutation info), e.g.:
+            cad_open_is_risk_test.txt<_perm_#_.....txt> # last part excluded
+    closed_file : str
+        Same as open_file but for closed = risk
+
+    Returns
+    -------
+    df : DataFrame
+        Same as input DF but with permutation data added and indexing by
+        gene set
+    mwu : sts.mannwhitneyu
+        A scipy.stats mwu object
+    pgenes : DataFrame
+        The merged permutation dataframe
+    pvt : DataFrame
+        The pivotted data
+    """
+    pgenes = []
+    for fl in [_pth(_os.path.abspath(path), i) for i in _os.listdir(path) if i.startswith(prefix)]:
+        if fl.endswith('files.txt'):
+            continue
+        perm = int(fl.split('_')[-1])
+        try:
+            d1 = pd.read_csv(_pth(fl, '{}_perm_{}_genesetenrichment.txt'.format(open_file, perm)), sep='\t')
+            d2 = pd.read_csv(_pth(fl, '{}_perm_{}_genesetenrichment.txt'.format(closed_file, perm)), sep='\t')
+        except:
+            continue
+        d1.columns = ['gene_set_ID', 'gene_set_description', 'p_value_open', 'FDR']
+        d2.columns = ['gene_set_ID', 'gene_set_description', 'p_value_closed', 'FDR']
+        d = pd.merge(d1, d2[['gene_set_ID', 'p_value_closed']], on='gene_set_ID')
+        d['perm'] = perm
+        pgenes.append(d)
+    pgenes = pd.concat(pgenes)
+
+    pgenes['log10_open'] = np.log10(pgenes.p_value_open)
+    pgenes['log10_closed'] = np.log10(pgenes.p_value_closed)
+    pgenes['pldiff'] = np.abs(pgenes.log10_closed - pgenes.log10_open)
+
+    pvt = pgenes.pivot_table(index='gene_set_ID', columns='perm', values='pldiff')
+
+    pvt['max_pldiff'] = pvt.apply(np.max, axis=1)
+
+    df.set_index('gene_set_ID', drop=False, inplace=True)
+
+    df['max_pldiff'] = pvt.max_pldiff
+
+    df['beats_perm'] = pgenes.pldiff > pgenes.max_pldiff
+
+    mwu = sts.mannwhitneyu(df.pldiff, pgenes.pldiff)
+
+    return df, mwu, pgenes, pvt
 
 
 ###############################################################################
@@ -513,18 +641,27 @@ def run_depict(sample_1, sample_2, prefix, cores=None,
     Returns:
         dict: Dictionary of relevant files. Raises Exception on error.
     """
+    FLAG_LOCI     = 1  # Construct loci based on your associated SNPs
+    FLAG_GENES    = 1  # Prioritize Genes
+    FLAG_GENESETS = 1  # Conduct reconstituted gene set enrichment analysis
+    FLAG_TISSUES  = 1  # Conduct tissue/cell type enrichment analysis
+    PARAM_NCORES  = 4  # Number of cores to use *PER PROCESS* for DEPICT
+
     if not cores:
         cores = PARAM_NCORES
+    # Set dirs
+    startdir = _os.path.abspath(_os.path.curdir)
+    run_path = _os.path.abspath(run_path if run_path else startdir)
+    print(run_path)
+    if not _os.path.isdir(run_path):
+        _os.mkdir(run_path)
     # Get DEPICT dir
     if not _os.path.isdir(depict_path):
         depict_path = DEPICT
     depict_path = _os.path.abspath(depict_path)
+    print(depict_path)
 
-    check_depict(depict_path)
-
-    # Change directory
-    startdir = _os.path.curdir
-    _os.chdir(run_path)
+    #  check_depict(depict_path)
 
     # Check sample files
     infiles = {
@@ -537,183 +674,195 @@ def run_depict(sample_1, sample_2, prefix, cores=None,
         with open(sample) as fin:
             assert fin.readline().strip().startswith('rs')
 
-    # Get names
-    names = {
-        'sample_1': '.'.join(_os.path.basename(sample_1).split('.')[:-1]),
-        'sample_2': '.'.join(_os.path.basename(sample_2).split('.')[:-1]),
-    }
-    prefixes = {
-        'sample_1_long': _os.path.abspath(_pth(prefix, names['sample_1'])),
-        'sample_2_long': _os.path.abspath(_pth(prefix, names['sample_2'])),
-        'sample_1': _pth(prefix, names['sample_1']),
-        'sample_2': _pth(prefix, names['sample_2']),
-    }
+    try:
+        # Change directory
+        _os.chdir(run_path)
 
-    # Set cores
-    if not cores:
-        cores = int(_mp.cpu_count()/2)
+        # Create prefix, prefix_long is in run_path, prefix is in depict_path
+        prefix = _os.path.basename(prefix)
+        prefix_long = _os.path.abspath(prefix)
+        if not _os.path.isdir(prefix_long):
+            _os.makedirs(prefix_long)
 
-    # Create directory
-    prefix_long = _os.path.abspath(prefix)
-    if not _os.path.isdir(prefix_long):
-        _os.makedirs(prefix_long)
-
-    # Change directory
-    _os.chdir(depict_path)
-    if not _os.path.isdir(prefix):
-        _os.makedirs(prefix)
-
-    # Create script templates
-    loci_script = (
-        "java -Xms512m -Xmx4000m -jar "
-        "{depict}/LocusGenerator/LocusGenerator.jar "
-        "{depict}/LocusGenerator/config.xml {infile} "
-        "{prefix} > {prefix}.log 2>&1"
-    )
-    gene_script = (
-        "java -Xms512m -Xmx16000m -jar {depict}/Depict/Depict.jar "
-        "{outname} {flag_genes} {flag_genesets} 0 {cores} {outdir} "
-        ">> {prefix}.log 2>&1"
-    )
-    tissue_script = (
-        "java -Xms512m -Xmx16000m -jar {depict}/Depict/Depict.jar "
-        "{outname} 0 1 1 {cores} {outdir} >> {prefix}.log 2>&1"
-    )
-
-    # Run jobs
-    if FLAG_LOCI:
-        print('Running loci building job..')
-        loci_jobs = {}
-        # Create jobs
-        for sample in ['sample_1', 'sample_2']:
-            loci_jobs[sample] = _mp.Process(
-                target = _call,
-                args   = (
-                    loci_script.format(
-                        depict=depict_path, infile=infiles[sample],
-                        prefix=prefixes[sample]
-                    ),
-                ),
-                kwargs = {'shell': True},
-                name = sample + '_locus'
-            )
-        # Run jobs
-        for job in loci_jobs.values():
-            job.start()
-        # Wait for finish
-        for job in loci_jobs.values():
-            job.join()
-        # Make sure job worked
-        for job in loci_jobs.values():
-            if job.exitcode != 0:
-                raise Exception('Job {} failed with exitcode {}'.format(
-                    job.name, job.exitcode
-                ))
-        for sample in ['sample_1', 'sample_2']:
-            _call('cp -f {}* {}'.format(prefixes[sample],
-                                        prefix_long), shell=True)
-
-    if FLAG_GENES or FLAG_GENESETS:
-        print('Running gene job..')
-        gene_jobs = {}
-        # Create jobs
-        for sample in ['sample_1', 'sample_2']:
-            gene_jobs[sample] = _mp.Process(
-                target = _call,
-                args   = (
-                    gene_script.format(
-                        depict=depict_path, cores=cores, outdir=prefix,
-                        flag_genes=FLAG_GENES, flag_genesets=FLAG_GENESETS,
-                        prefix=prefixes[sample], outname=names[sample]
-                    ),
-                ),
-                kwargs = {'shell': True},
-                name = sample + '_gene'
-            )
-        # Run jobs
-        for job in gene_jobs.values():
-            job.start()
-        # Wait for finish
-        for job in gene_jobs.values():
-            job.join()
-        # Make sure job worked
-        for job in gene_jobs.values():
-            if job.exitcode != 0:
-                raise Exception('Job {} failed with exitcode {}'.format(
-                    job.name, job.exitcode
-                ))
-        for sample in ['sample_1', 'sample_2']:
-            _call('cp -f {}* {}'.format(prefixes[sample],
-                                        prefix_long), shell=True)
-
-    if FLAG_TISSUES:
-        print('Running tissue job..')
-        tissue_jobs = {}
-        # Create jobs
-        for sample in ['sample_1', 'sample_2']:
-            tissue_jobs[sample] = _mp.Process(
-                target = _call,
-                args   = (
-                    tissue_script.format(
-                        depict=depict_path, cores=cores, outdir=prefix,
-                        flag_genes=FLAG_GENES, flag_genesets=FLAG_GENESETS,
-                        prefix=prefixes[sample], outname=names[sample]
-                    ),
-                ),
-                kwargs = {'shell': True},
-                name = sample + '_tissue'
-            )
-        # Run jobs
-        for job in tissue_jobs.values():
-            job.start()
-        # Wait for finish
-        for job in tissue_jobs.values():
-            job.join()
-        # Make sure job worked
-        for job in tissue_jobs.values():
-            if job.exitcode != 0:
-                raise Exception('Job {} failed with exitcode {}'.format(
-                    job.name, job.exitcode
-                ))
-        for sample in ['sample_1', 'sample_2']:
-            _call('cp -f {}* {}'.format(prefixes[sample],
-                                        prefix_long), shell=True)
-
-    # Remove temp dir as all our files are in our new dir
-    if _os.path.abspath(prefix) != prefix_long:
-        _call('rm -rf {}'.format(prefix), shell=True)
-
-    # Change directory
-    _os.chdir(startdir)
-
-    # Check output files
-    expected_suffices = {
-        'loci': '_loci.txt',
-        'gene': '_genesetenrichment.txt',
-        'tissue': '_tissueenrichment.txt',
-    }
-    expected_outputs = {}
-    for sample in ['sample_1', 'sample_2']:
-        expected_outputs[sample] = {
-            'loci': '{}{}'.format(prefixes[sample + '_long'],
-                                  expected_suffices['loci']),
-            'gene': '{}{}'.format(prefixes[sample + '_long'],
-                                  expected_suffices['gene']),
-            'tissue': '{}{}'.format(prefixes[sample + '_long'],
-                                    expected_suffices['tissue']),
+        # Get names
+        names = {
+            'sample_1': '.'.join(_os.path.basename(sample_1).split('.')[:-1]),
+            'sample_2': '.'.join(_os.path.basename(sample_2).split('.')[:-1]),
         }
-    for sample, files in expected_outputs.items():
-        for fl in files.values():
-            assert _os.path.isfile(fl)
+        prefixes = {
+            'sample_1_long': _pth(prefix_long, names['sample_1']),
+            'sample_2_long': _pth(prefix_long, names['sample_2']),
+            'sample_1': _pth(prefix, names['sample_1']),
+            'sample_2': _pth(prefix, names['sample_2']),
+        }
 
-    with open(prefix + '_files.txt', 'wb') as fout:
-        pickle.dump(expected_outputs, fout)
+        # Set cores
+        if not cores:
+            cores = int(_mp.cpu_count()/2)
+
+        # Change directory
+        _os.chdir(depict_path)
+        print(depict_path)
+        if not _os.path.isdir(prefix):
+            _os.makedirs(prefix)
+
+        # Create script templates
+        loci_script = (
+            "java -Xms512m -Xmx4000m -jar "
+            "{depict}/LocusGenerator/LocusGenerator.jar "
+            "{depict}/LocusGenerator/config.xml {infile} "
+            "{prefix} > {prefix}.log 2>&1"
+        )
+        gene_script = (
+            "java -Xms512m -Xmx16000m -jar {depict}/Depict/Depict.jar "
+            "{outname} {flag_genes} {flag_genesets} 0 {cores} {outdir} "
+            ">> {prefix}.log 2>&1"
+        )
+        tissue_script = (
+            "java -Xms512m -Xmx16000m -jar {depict}/Depict/Depict.jar "
+            "{outname} 0 1 1 {cores} {outdir} >> {prefix}.log 2>&1"
+        )
+
+        # Run jobs
+        if FLAG_LOCI:
+            print('Running loci building job..')
+            loci_jobs = {}
+            # Create jobs
+            for sample in ['sample_1', 'sample_2']:
+                loci_jobs[sample] = _mp.Process(
+                    target = _call,
+                    args   = (
+                        loci_script.format(
+                            depict=depict_path, infile=infiles[sample],
+                            prefix=prefixes[sample]
+                        ),
+                    ),
+                    kwargs = {'shell': True},
+                    name = sample + '_locus'
+                )
+            # Run jobs
+            for job in loci_jobs.values():
+                job.start()
+            # Wait for finish
+            for job in loci_jobs.values():
+                job.join()
+            # Make sure job worked
+            for job in loci_jobs.values():
+                if job.exitcode != 0:
+                    raise Exception('Job {} failed with exitcode {}'.format(
+                        job.name, job.exitcode
+                    ))
+            for sample in ['sample_1', 'sample_2']:
+                print('copying results')
+                _call('cp -f {}* {}'.format(prefixes[sample],
+                                            prefix_long), shell=True)
+
+        if FLAG_GENES or FLAG_GENESETS:
+            print('Running gene job..')
+            gene_jobs = {}
+            # Create jobs
+            for sample in ['sample_1', 'sample_2']:
+                gene_jobs[sample] = _mp.Process(
+                    target = _call,
+                    args   = (
+                        gene_script.format(
+                            depict=depict_path, cores=cores, outdir=prefix,
+                            flag_genes=FLAG_GENES, flag_genesets=FLAG_GENESETS,
+                            prefix=prefixes[sample], outname=names[sample]
+                        ),
+                    ),
+                    kwargs = {'shell': True},
+                    name = sample + '_gene'
+                )
+            # Run jobs
+            for job in gene_jobs.values():
+                job.start()
+            # Wait for finish
+            for job in gene_jobs.values():
+                job.join()
+            # Make sure job worked
+            for job in gene_jobs.values():
+                if job.exitcode != 0:
+                    raise Exception('Job {} failed with exitcode {}'.format(
+                        job.name, job.exitcode
+                    ))
+            for sample in ['sample_1', 'sample_2']:
+                _call('cp -f {}* {}'.format(prefixes[sample],
+                                            prefix_long), shell=True)
+
+        if FLAG_TISSUES:
+            print('Running tissue job..')
+            tissue_jobs = {}
+            # Create jobs
+            for sample in ['sample_1', 'sample_2']:
+                tissue_jobs[sample] = _mp.Process(
+                    target = _call,
+                    args   = (
+                        tissue_script.format(
+                            depict=depict_path, cores=cores, outdir=prefix,
+                            flag_genes=FLAG_GENES, flag_genesets=FLAG_GENESETS,
+                            prefix=prefixes[sample], outname=names[sample]
+                        ),
+                    ),
+                    kwargs = {'shell': True},
+                    name = sample + '_tissue'
+                )
+            # Run jobs
+            for job in tissue_jobs.values():
+                job.start()
+            # Wait for finish
+            for job in tissue_jobs.values():
+                job.join()
+            # Make sure job worked
+            for job in tissue_jobs.values():
+                if job.exitcode != 0:
+                    raise Exception('Job {} failed with exitcode {}'.format(
+                        job.name, job.exitcode
+                    ))
+            for sample in ['sample_1', 'sample_2']:
+                _call('cp -f {}* {}'.format(prefixes[sample],
+                                            prefix_long), shell=True)
+
+        # Remove temp dir as all our files are in our new dir
+        #  if _os.path.abspath(prefix) != prefix_long:
+            #  _call('rm -rf {}'.format(prefix), shell=True)
+
+        # Change directory
+        _os.chdir(run_path)
+
+        # Check output files
+        expected_suffices = {
+            'loci': '_loci.txt',
+            'gene': '_genesetenrichment.txt',
+            'tissue': '_tissueenrichment.txt',
+        }
+        expected_outputs = {}
+        for sample in ['sample_1', 'sample_2']:
+            expected_outputs[sample] = {
+                'loci': '{}{}'.format(prefixes[sample + '_long'],
+                                    expected_suffices['loci']),
+                'gene': '{}{}'.format(prefixes[sample + '_long'],
+                                    expected_suffices['gene']),
+                'tissue': '{}{}'.format(prefixes[sample + '_long'],
+                                        expected_suffices['tissue']),
+            }
+        for sample, files in expected_outputs.items():
+            for fl in files.values():
+                assert _os.path.isfile(fl)
+
+        with open(_pth(run_path, prefix + '_files.txt'), 'wb') as fout:
+            _pickle.dump(expected_outputs, fout)
+
+    finally:
+        # Change directory
+        _os.chdir(startdir)
 
     return expected_outputs
 
 
 def run_depict_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
-                           run_path=None, depict_path=DEPICT, **fyrd_args):
+                           run_path=None, depict_path=DEPICT,
+                           perm_start=None, **fyrd_args):
     """Run DEPICT repeatedly and return locations of output files.
 
     This function uses fyrd to submit cluster jobs, jobs will request 2*cores
@@ -732,6 +881,7 @@ def run_depict_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
         perms (int):       Number of permutations.
         run_path (str):    Root directory to run in, defaults to current dir
         depict_path (str): Path to the DEPICT package, default set in file.
+        perm_start (int):  Number to start permutations from
         fyrd_args (dict):  Fyrd keyword arguments, not required.
 
     Outputs:
@@ -747,6 +897,22 @@ def run_depict_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
     if not cores:
         cores = PARAM_NCORES
     check_depict(depict_path)
+    run_path = run_path if run_path else _os.path.abspath('.')
+    selfpath = _os.path.realpath(__file__)
+    if not perm_start:
+        counts = []
+        for fl in _os.listdir(run_path):
+            if fl.startswith('{}_perm_'.format(prefix)):
+                c = fl.split('_')[-1]
+                if c.isdigit():
+                    counts.append(int(c))
+        if counts:
+            perm_start = max(counts) + 1
+        else:
+            perm_start = 1
+    if not isinstance(perm_start, int):
+        perm_start = 1
+    print('Starting permutation count at {}'.format(perm_start))
     s1_rsids = []
     s2_rsids = []
     with open(sample_1) as fin:
@@ -755,11 +921,12 @@ def run_depict_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
         s2_rsids += fin.read().strip().split('\n')
     rsids = np.array(s1_rsids + s2_rsids)
     jobs  = {}
-    count = 1
+    count = perm_start
     print('Running {} permutations'.format(perms))
+    imports = ["import permute_depict as depict",
+               "from permute_depict import *"]
     ttl = perms
     pbar = pb(total=ttl, unit='perms')
-    perms += 1
     while perms:
         this_perm = np.random.permutation(rsids)
         new_sample_1_data = sorted(this_perm[:len(s1_rsids)])
@@ -797,12 +964,15 @@ def run_depict_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
                 name    = new_prefix,
                 imports = ['import os as _os',
                            'from os.path import join as _pth',
-                           'from subprocess import check_call as _call'],
+                           'from subprocess import check_call as _call',
+                           'import permute_depict as depict',
+                           'from permute_depict import *'],
                 cores   = cores*2,
                 mem     = '12GB',
                 scriptpath  = job_path,
                 outpath     = job_path,
                 runpath     = run_path,
+                syspaths    = selfpath,
                 **fyrd_args
             )
         )
@@ -823,8 +993,11 @@ def run_depict_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
                 if job.done:
                     outs = job.get()
                     outputs[name] = outs
-                    with open(name + '.files.dict', 'wb') as fout:
-                        _pickle.dump(outs, fout)
+                    with open(_pth(run_path, name) + '.files.dict', 'wb') as fout:
+                        try:
+                            _pickle.dump(outs, fout)
+                        except TypeError:
+                            pass
                     pbar.update()
             _sleep(1)
 
@@ -834,7 +1007,7 @@ def run_depict_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
 
 
 def rescue_permutation(sample_1, sample_2, prefix, cores=None, perms=100,
-                        run_path=None, depict_path=DEPICT, **fyrd_args):
+                       run_path=None, depict_path=DEPICT, **fyrd_args):
     """Create output dict from run_depict_permutation from directory.
 
     Args:
@@ -987,7 +1160,7 @@ def open_zipped(infile, mode='r'):
         if infile.endswith('.gz'):
             return _gzip.open(infile, mode)
         if infile.endswith('.bz2'):
-            if hasattr(bz2, 'open'):
+            if hasattr(_bz2, 'open'):
                 return _bz2.open(infile, mode)
             else:
                 return _bz2.BZ2File(infile, p2mode)
@@ -1013,21 +1186,46 @@ def command_line_parser():
     # Subcommands
     modes = parser.add_subparsers(dest='modes')
 
-    analyze_depict = modes.add_parser(
+    anlyze_depict = modes.add_parser(
         'analyze', description='Run DEPICT, plus permutation on cluster',
         help="Run DEPICT, plus permutation on cluster"
     )
 
     # Options
-    analyze_depict.add_argument('sample1', help="First sample")
-    analyze_depict.add_argument('sample2', help="Second sample")
-    analyze_depict.add_argument('outdir', help="Directory to write to")
+    anlyze_depict.add_argument('sample1', help="First sample")
+    anlyze_depict.add_argument('sample2', help="Second sample")
+    anlyze_depict.add_argument('outdir', help="Directory to write to")
 
-    analyze_depict.add_argument('-p', '--perms', help='Number of permutation')
-    analyze_depict.add_argument('-c', '--cores',
+    anlyze_depict.add_argument('-p', '--perms', help='Number of permutation')
+    anlyze_depict.add_argument('-c', '--cores',
                                 help='Cores per job, 2 jobs per queue job')
-    analyze_depict.add_argument('-r', '--run-path', help='Where to run')
-    analyze_depict.add_argument('-d', '--depict-path', help='Path to DEPICT')
+    anlyze_depict.add_argument('-r', '--run-path', help='Where to run')
+    anlyze_depict.add_argument('-d', '--depict-path', help='Path to DEPICT')
+
+    run_perms = modes.add_parser(
+        'permute', description='Run DEPICT permutations on cluster',
+        help="Run DEPICT permutations on cluster"
+    )
+
+    # Options
+    run_perms.add_argument('sample1', help="First sample")
+    run_perms.add_argument('sample2', help="Second sample")
+    run_perms.add_argument('prefix',  help='Prefix to use for run')
+    run_perms.add_argument('outdir',  help="Directory to write to")
+
+    run_perms.add_argument('-p', '--perms', default=100,type=int,
+                           help='Number of permutation')
+    run_perms.add_argument('-c', '--cores', default=2, type=int,
+                           help='Cores per job, 2 jobs per queue job')
+    run_perms.add_argument('-d', '--depict-path', help='Path to DEPICT')
+    run_perms.add_argument('--perm_start', type=int,
+                           help='Start permutation count at this number ' +
+                           'defaults to the highest count in the run dir + 1' +
+                           ' or 1 if no permutations exist.')
+    run_perms.add_argument('--fprofile', help='fyrd profile')
+    run_perms.add_argument('--walltime', help='walltime per job')
+    run_perms.add_argument('--clean', action='store_true',
+                           help='clean job files')
 
     drop_hla = modes.add_parser(
         'drop-hla', description='Drop HLA from SNPs',
@@ -1067,6 +1265,27 @@ def main(argv=None):
         analyze_depict(args.sample1, args.sample2, args.outdir,
                        perms=args.perms, cores=args.cores,
                        run_path=args.run_path, depict_path=args.depict_path)
+
+    if args.modes == 'permute':
+        dpth = args.depict_path if args.depict_path else DEPICT
+        ag = dict(
+            sample_1=args.sample1, sample_2=args.sample2, prefix=args.prefix,
+            cores=args.cores, perms=args.perms,
+            run_path=_os.path.abspath(args.outdir),
+            depict_path=_os.path.abspath(dpth)
+        )
+        if args.perm_start:
+            ag.update(dict(perm_start=args.perm_start))
+        if args.fprofile:
+            ag.update(dict(profile=args.fprofile))
+        if args.walltime:
+            ag.update(dict(walltime=args.walltime))
+        if args.clean:
+            ag.update(dict(clean_outputs=True, clean_files=True))
+        else:
+            ag.update(dict(clean_outputs=False, clean_files=False))
+        print(ag)
+        run_depict_permutation(**ag)
 
     elif args.modes == 'drop-hla':
         strip_hla(args.infile, args.outfile)
