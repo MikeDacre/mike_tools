@@ -23,6 +23,11 @@ import seaborn as sns
 import networkx as nx
 from adjustText import adjust_text
 
+# Get rid of pandas future warnings
+import warnings as _warn
+_warn.simplefilter(action='ignore', category=FutureWarning)
+_warn.simplefilter(action='ignore', category=UserWarning)
+_warn.simplefilter(action='ignore', category=RuntimeWarning)
 
 ###############################################################################
 #                             Basic Scatter Plots                             #
@@ -177,8 +182,10 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
     # Make the plot a square
     emin = min(np.min(xhist), np.min(yhist))
     emax = max(np.max(xhist), np.max(yhist))
-    emin -= emax*0.1
-    emax += emax*0.1
+    t2b = abs(emax-emin)
+    scale = t2b*0.01
+    emin -= scale
+    emax += scale
     lim = (emin, emax)
     ax.set_xlim(lim)
     ax.set_ylim(lim)
@@ -266,7 +273,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             labels=None, fig=None, ax=None, density=True, log_scale=False,
             legend='best', label_lim=10, shift_labels=False, highlight=None,
             highlight_label=None, add_text=None, reg_details=True,
-            regression=True):
+            scale_factor=0.02, regression=True):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
@@ -276,29 +283,46 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
 
     Density defaults to true, it can be fairly slow if there are many points.
 
-    Args:
-        x (Series):      X values
-        y (Series):      Y values
-        xlabel (str):    A label for the x axis
-        ylabel (str):    A label for the y axis
-        title (str):     Name of the plot
-        pval (float):    Draw a line at this point*point count
-        labels (Series): Labels to show
-        fig:             A pyplot figure
-        ax:              A pyplot axes object
-        density (bool):  Color points by density
-        log_scale (str): Plot in log scale, can also be 'negative' for
-                         negative log scale.
-        legend (str):    The location to place the legend
-        label_lim (int): Only show top # labels on each side of the line
-        shift_labels:    If True, try to spread labels out. Imperfect.
-        highlight_label (Series): Boolean series of same len as x/y
-        reg_details (bool): Print regression summary
-        regression (bool): Do a regression
+    Parameters
+    ----------
+    x : Series
+        X values
+    y : Series
+        Y values
+    xlabel : str
+        A label for the x axis
+    ylabel : str
+        A label for the y axis
+    title : str
+        Name of the plot
+    pval : float
+        Draw a line at this point*point count
+    labels : Series
+        Labels to show
+    fig : A pyplot figure
+    ax : A pyplot axes object
+    density : bool
+        Color points by density
+    log_scale : str
+        Plot in log scale, can also be 'negative' for
+                        negative log scale.
+    legend : str
+        The location to place the legend
+    label_lim : int
+        Only show top # labels on each side of the line
+    shift_labels:    If True, try to spread labels out. Imperfect.
+    highlight_label : Series
+        Boolean series of same len as x/y
+    reg_details : bool
+        Print regression summary
+    regression : bool
+        Do a regression
+    scale_factor : float
+        A ratio to expand the axes by.
 
-
-    Returns:
-        (fig, ax): A pyplot figure and axis object in a tuple
+    Returns
+    -------
+    (fig, ax): A pyplot figure and axis object in a tuple
     """
     f, a = _get_fig_ax(fig, ax)
     #  a.grid(False)
@@ -309,8 +333,9 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         ly = np.log10(y)
         mx = max(np.max(lx), np.max(ly))
         mn = min(np.min(lx), np.min(ly))
-        mxs = 10**(mx+1)
-        mns = 10**(mn-1)
+        scale = abs(mx-mn)*scale_factor
+        mxs = 10**(mx+scale)
+        mns = 10**(mn-scale)
         mlim = (mns, mxs)
         # Do the regression
         if regression:
@@ -326,7 +351,8 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     else:
         mx = max(np.max(x), np.max(y))
         mn = min(np.min(x), np.min(y))
-        mlim = (mn+(0.01*(int(mn)-1)), mx+(0.01*(int(mx)+1)))
+        scale = abs(mx-mn)*scale_factor
+        mlim = (mn+scale, mx+scale)
         # Do the regression
         if regression:
             model = sm.OLS(y, x)
@@ -352,26 +378,27 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     if pval:
         pval = float(pval)
         pval = pval/len(x)
-        a.plot(mlim, (pval, pval), color='0.5', alpha=0.3)
-        a.plot((pval, pval), mlim, color='0.6', alpha=0.5)
-        if log_scale == 'negative':
-            mxa = mx+1.25
-            tpos = 10**(mxa)
-        elif log_scale:
-            mna = mn-1.25
-            tpos = 10**(mna)
-        else:
-            tpos = mlim[0] - (mlim[0] * .1)
-        a.text(tpos, pval, 'p={:.1e}'.format(pval))
-        dr = pd.concat([pd.Series(x), pd.Series(y)], axis=1)
-        dr.columns = ['x', 'y']
-        dr = dr[(dr.x <= pval) | (dr.y <= pval)]
-        both = dr[(dr.x <= pval) & (dr.y <= pval)]
-        dr = dr[(dr.x <= pval) ^ (dr.y <= pval)]
-        a.plot(dr.x, dr.y, 'o', c=sns.xkcd_rgb['gold'], alpha=0.2,
-               label='goaway')
-        a.plot(both.x, both.y, 'o', c=sns.xkcd_rgb['lilac'], alpha=0.2,
-               label='goaway')
+        if pval >= mlim[0]:
+            a.plot(mlim, (pval, pval), color='0.5', alpha=0.3)
+            a.plot((pval, pval), mlim, color='0.6', alpha=0.5)
+            if log_scale == 'negative':
+                mxa = mx+1.25
+                tpos = 10**(mxa)
+            elif log_scale:
+                mna = mn-1.25
+                tpos = 10**(mna)
+            else:
+                tpos = mlim[0] - (mlim[0] * .1)
+            a.text(tpos, pval, 'p={:.1e}'.format(pval))
+            dr = pd.concat([pd.Series(x), pd.Series(y)], axis=1)
+            dr.columns = ['x', 'y']
+            dr = dr[(dr.x <= pval) | (dr.y <= pval)]
+            both = dr[(dr.x <= pval) & (dr.y <= pval)]
+            dr = dr[(dr.x <= pval) ^ (dr.y <= pval)]
+            a.plot(dr.x, dr.y, 'o', c=sns.xkcd_rgb['gold'], alpha=0.2,
+                label='goaway')
+            a.plot(both.x, both.y, 'o', c=sns.xkcd_rgb['lilac'], alpha=0.2,
+                label='goaway')
 
     # Density plot
     if density:
@@ -391,7 +418,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             s = a.scatter(x2, y2, c=z, s=50,
                           cmap=sns.cubehelix_palette(8, as_cmap=True),
                           edgecolor='', label=None, picker=True, zorder=2)
-        except np.linalg.linalg.LinAlgError:
+        except (ValueError, np.linalg.linalg.LinAlgError):
             # Too small for density
             s = a.scatter(x, y,
                           cmap=sns.cubehelix_palette(8, as_cmap=True),
