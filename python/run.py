@@ -31,7 +31,7 @@ def run(command, raise_on_error=False):
         raise subprocess.CalledProcessError(
             returncode=code, cmd=command, output=out, stderr=err
         )
-    return out.decode(), err.decode(), code
+    return out, err, code
 
 
 def open_zipped(infile, mode='r'):
