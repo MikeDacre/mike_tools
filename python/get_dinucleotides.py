@@ -7,25 +7,29 @@ For each position, will generate a list of + strand dinucleotides and - strand
 dinucleotides.
 
        Created: 2017-07-27 12:02
- Last modified: 2017-03-14 16:23
+ Last modified: 2017-10-18 00:17
 """
+from __future__ import print_function
 import os
+import sys
 import bz2
 import gzip
 from datetime import timedelta as _td
+import logging as _log
+import pandas as pd
 
 import fyrd
 from Bio import SeqIO as seqio
 
+hg18 = "/godot/genomes/human/hg18"
 hg19 = "/godot/genomes/human/hg19"
-
 
 ###############################################################################
 #                               Core Algorithm                                #
 ###############################################################################
 
 
-def get_dinucleotides(positions, genome_file, base=0, as_dict=False):
+def get_dinucleotides(positions, genome_file, base=0, return_as='list'):
     """Return a list of all + and - strand dinucleotides around each position.
 
     Will loop through each chromosome and search all positions in that
@@ -37,39 +41,51 @@ def get_dinucleotides(positions, genome_file, base=0, as_dict=False):
                            files. If directory, file names must be
                            <chrom_name>.fa[.gz]. Gzipped OK.
         base (int):        Either 0 or 1, base of positions in your list
-        as_dict (bool):    Return a dictionary of:
+        return_as (str):   dict: Return a dictionary of:
                            {chrom->{postion->{'ref': str, '+': tuple, '-': tuple}}}
-                           Otherwise just returns two lists with no positions.
+                           list: just returns two lists with no positions.
+                           df: return DataFrame
 
     Returns:
         (list, list): + strand dinucleotides, - strand dinucleotides. Returns
-                      a dict instead if as_dict is True, see above for info.
+                      a dict or instead if requested through return_as.
     """
     if os.path.isdir(genome_file):
         chroms = positions.keys()
         files = []
         for chrom in chroms:
             files.append(get_fasta_file(genome_file, chrom))
-        final = {} if as_dict else ([], [])
+        if return_as == 'df':
+            final = []
+        elif return_as == 'dict':
+            final = {}
+        else:
+            final = ([], [])
         for chrom, fl in zip(chroms, files):
-            if as_dict:
-                pos = {chrom: positions[chrom]}
-                final.update(get_dinucleotides(pos, fl, base, as_dict))
+            pos = {chrom: positions[chrom]}
+            res = get_dinucleotides(pos, fl, base, return_as)
+            if return_as == 'df':
+                final.append(res)
+            elif return_as == 'dict':
+                final.update(res)
             else:
-                plus, minus = get_dinucleotides(pos, fl, base, as_dict)
+                plus, minus = res
                 final[0] += plus
                 final[1] += minus
+        if return_as == 'df':
+            print('Converting to dataframe')
+            final = pd.concat(final)
         return final
 
     done = []
-    results = {} if as_dict else ([], [])
+    results = {} if return_as in ('dict', 'df') else ([], [])
     with open_zipped(genome_file) as fasta_file:
         for chrom in seqio.parse(fasta_file, 'fasta'):
             if chrom.id not in positions:
                 continue
             else:
                 done.append(chrom.id)
-                if as_dict:
+                if return_as in ('dict', 'df'):
                     results[chrom.id] = {}
             for pos in positions[chrom.id]:
                 pos    = pos-base
@@ -78,7 +94,7 @@ def get_dinucleotides(positions, genome_file, base=0, as_dict=False):
                 plus2  = chrom[pos:pos+2]
                 minus1 = plus1.reverse_complement()
                 minus2 = plus2.reverse_complement()
-                if as_dict:
+                if return_as in ('dict', 'df'):
                     results[chrom.id][pos] = {
                         'ref': ref,
                         '+': (seq(plus1), seq(plus2)),
@@ -90,15 +106,36 @@ def get_dinucleotides(positions, genome_file, base=0, as_dict=False):
         print('The following chromosomes were not in files: {}'
               .format([i for i in positions if i not in done]))
 
+    if return_as == 'df':
+        print('Converting to dataframe')
+        results = dict_to_df(results, base)
+
     return results
 
+
+def dict_to_df(results, base):
+    """Convert results dictionary into a DataFrame."""
+    dfs = []
+    for chrom, data in results.items():
+        nuc_lookup = pd.DataFrame.from_dict(data, orient='index')
+        nuc_lookup['chrom'] = chrom
+        nuc_lookup['position'] = nuc_lookup.index.to_series().astype(int) + base
+        nuc_lookup['snp'] = nuc_lookup.chrom.astype(str) + '.' + nuc_lookup.position.astype(str)
+        nuc_lookup.set_index('snp', drop=True, inplace=True)
+        dfs.append(nuc_lookup)
+    result = pd.concat(dfs)
+    dfs = None
+    result = result[['ref', '+', '-']]
+    result.sort_index()
+    result.index.name = None
+    return result
 
 ###############################################################################
 #                               Parallelization                               #
 ###############################################################################
 
 
-def get_dinucleotides_parallel(positions, genome_file, base=0, as_dict=False):
+def get_dinucleotides_parallel(positions, genome_file, base=0, return_as='list'):
     """Return a list of all + and - strand dinucleotides around each position.
 
     Will loop through each chromosome and search all positions in that
@@ -111,13 +148,14 @@ def get_dinucleotides_parallel(positions, genome_file, base=0, as_dict=False):
                            <chrom_name>.fa[.gz]. Gzipped OK. Directory is
                            preferred in parallel mode.
         base (int):        Either 0 or 1, base of positions in your list
-        as_dict (bool):    Return a dictionary of:
-                               {chrom->{postion->{'+': tuple, '-': tuple}}}
-                           Otherwise just returns two lists with no positions.
+        return_as (str):   dict: Return a dictionary of:
+                           {chrom->{postion->{'ref': str, '+': tuple, '-': tuple}}}
+                           list: just returns two lists with no positions.
+                           df: return DataFrame
 
     Returns:
         (list, list): + strand dinucleotides, - strand dinucleotides. Returns
-                      a dict instead if as_dict is True, see above for info.
+                      a dict or instead if requested through return_as.
     """
     outs = []
     for chrom in positions.keys():
@@ -130,21 +168,36 @@ def get_dinucleotides_parallel(positions, genome_file, base=0, as_dict=False):
         outs.append(
             fyrd.submit(
                 get_dinucleotides,
-                ({chrom: positions[chrom]}, fa_file, base, as_dict),
+                ({chrom: positions[chrom]}, fa_file, base, return_as),
                 cores=1, mem='6GB', time=time,
             )
         )
 
-    final = {} if as_dict else ([], [])
+    if return_as == 'df':
+        final = []
+    elif return_as == 'dict':
+        final = {}
+    else:
+        final = ([], [])
 
+    fyrd.wait(outs)
+    print('Getting results')
     for out in outs:
-        if as_dict:
-            res = out.get()
+        res = out.get()
+        if return_as == 'df':
+            if isinstance(res, dict):
+                res = dict_to_df(res, base)
+            final.append(res)
+        elif return_as == 'dict':
             final.update(res)
         else:
-            plus, minus = out.get()
+            plus, minus = res
             final[0] += plus
             final[1] += minus
+
+    if return_as == 'df':
+        print('Joining dataframe')
+        final = pd.concat(final)
 
     return final
 
@@ -233,3 +286,4 @@ def tsv_bed_vcf(infile, base=0):
                 continue
             f = line.rstrip().split('\t')
             yield f[0], int(f[1])-base
+

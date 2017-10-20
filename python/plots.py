@@ -34,8 +34,8 @@ _warn.simplefilter(action='ignore', category=RuntimeWarning)
 ###############################################################################
 
 
-def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
-             ylabel=None, xlabel=None, title=None, size=7):
+def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
+             style='column', ylabel=None, xlabel=None, title=None, size=7):
     """Compare two vectors of different length by creating equal bins.
 
     If kind is qq, the plot is a simple Quantile-Quantile plot, if it is pp,
@@ -64,25 +64,35 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
         frequency, so that the final bin will always have a value of one.
 
 
-    Args:
-        actual (Series):  Series of actual data, will go on y-axis
-        theoretical:      Series of theoretical data, will go on x-axis
-        bins (int):       Number of bins to use for plotting, default 1000
-        kind (str):       qq: Plot a Q-Q plot
-                          cum: Plot a cumulative probability plot
-        style (str):      simple: Plot a simple scatter plot
-                          joint: Plot a scatter plot with univariate dists on
-                          each axis.
-                          column: Plot a scatter plot with univariate
-                          histograms, separately calculated, on the side.
-        {y/x}label (str): Optional label for y/x axis. y=Actual,
-                          x=Theretical
-        title (str):      Optional title for the whole plot
-        size (int):       A size to use for the figure, square is forced.
+    Parameters
+    ----------
+    actual : Series
+        Series of actual data, will go on y-axis
+    theoretical : Series or string
+        Series of theoretical data, will go on x-axis, can also be one of
+        'normal' or 'uniform', to use a random distribution
+    bins : int
+        Number of bins to use for plotting, default 1000
+    kind : str
+        qq:  Plot a Q-Q plot
+        cum: Plot a cumulative probability plot
+    style : str
+        simple: Plot a simple scatter plot
+        joint: Plot a scatter plot with univariate dists on each axis.
+        column: Plot a scatter plot with univariate histograms, separately
+        calculated, on the side.
+    {y/x}label : str
+        Optional label for y/x axis. y=Actual, x=Theretical
+    title : str
+        Optional title for the whole plot
+    size : int
+        A size to use for the figure, square is forced.
 
-    Returns:
-        fig, ax: Figure and axes always returned, if joint is True, axes
-                 object will be a seaborn axgrid.
+    Returns
+    -------
+    fig, ax
+        Figure and axes always returned, if joint is True, axes
+        object will be a seaborn axgrid.
     """
     if kind not in ['qq', 'cum', 'pp']:
         raise ValueError('kind must be one of qq or pp (cumulative)')
@@ -90,6 +100,14 @@ def distcomp(actual, theoretical, bins=100, kind='qq', style='column',
         raise ValueError('style must be one of simple, joint, or colummn')
     kind = 'cum' if kind == 'pp' else kind
     style = 'simple' if style == 'scatter' else style
+
+    if isinstance(theoretical, str):
+        if theoretical == 'normal':
+            theoretical = np.random.normal(len(actual))
+        elif theoretical == 'uniform':
+            theoreticcal = np.random.random_sample(len(actual))
+        else:
+            raise ValueError('Invalid theoretical')
 
     x = theoretical
     y = actual
@@ -273,7 +291,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             labels=None, fig=None, ax=None, density=True, log_scale=False,
             legend='best', label_lim=10, shift_labels=False, highlight=None,
             highlight_label=None, add_text=None, reg_details=True,
-            scale_factor=0.02, regression=True):
+            scale_factor=0.02, regression=True, size=10):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
@@ -319,13 +337,25 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         Do a regression
     scale_factor : float
         A ratio to expand the axes by.
+    size : int or tuple
 
     Returns
     -------
     (fig, ax): A pyplot figure and axis object in a tuple
     """
-    f, a = _get_fig_ax(fig, ax)
+    f, a = _get_fig_ax(fig, ax, size=size)
     #  a.grid(False)
+    if df:
+        assert isinstance(x, str)
+        assert isinstance(y, str)
+        if log_scale:
+            df = df[(df[x] > 0) & (df[y] > 0)]
+        if not xlabel:
+            xlabel = x
+        x = df[x]
+        if not xlabel:
+            xlabel = y
+        y = df[y]
 
     # Set up log scaling if necessary
     if log_scale:
@@ -333,9 +363,13 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         ly = np.log10(y)
         mx = max(np.max(lx), np.max(ly))
         mn = min(np.min(lx), np.min(ly))
-        scale = abs(mx-mn)*scale_factor
-        mxs = 10**(mx+scale)
-        mns = 10**(mn-scale)
+        if scale_factor:
+            scale = abs(mx-mn)*scale_factor
+            mxs = 10**(mx+scale)
+            mns = 10**(mn-scale)
+        else:
+            mxs = 10**mx
+            mns = 10**mn
         mlim = (mns, mxs)
         # Do the regression
         if regression:
@@ -351,8 +385,11 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     else:
         mx = max(np.max(x), np.max(y))
         mn = min(np.min(x), np.min(y))
-        scale = abs(mx-mn)*scale_factor
-        mlim = (mn+scale, mx+scale)
+        if scale_factor:
+            scale = abs(mx-mn)*scale_factor
+            mlim = (mn+scale, mx+scale)
+        else:
+            mlim = (mn, mx)
         # Do the regression
         if regression:
             model = sm.OLS(y, x)
@@ -440,7 +477,8 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         a.loglog()
 
     # Plot a 1-1 line in the background
-    a.plot(mlim, mlim, '-', color='0.75', zorder=1)
+    print(mlim)
+    a.plot(mlim, mlim, '-', color='0.75', zorder=1000)
 
     handles, labls = a.get_legend_handles_labels()
     rm = []
@@ -793,7 +831,7 @@ def manhattan(chrdict, sig_line=0.001, title=None, image_path=None,
 ###############################################################################
 
 
-def _get_fig_ax(fig, ax):
+def _get_fig_ax(fig, ax, size=9):
     """Check figure and axis, and create if none."""
     if fig:
         if bool(fig) == bool(ax):
@@ -803,7 +841,9 @@ def _get_fig_ax(fig, ax):
             raise Exception('You must provide both fig and ax, not just one.')
         return fig, ax
     else:
-        return plt.subplots(figsize=(9,9))
+        if isinstance(size, int):
+            size = (size, size)
+        return plt.subplots(figsize=size)
 
 
 def _dict_to_list(chrdict):
