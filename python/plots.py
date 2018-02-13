@@ -34,8 +34,8 @@ _warn.simplefilter(action='ignore', category=RuntimeWarning)
 ###############################################################################
 
 
-def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
-             style='column', ylabel=None, xlabel=None, title=None, size=7):
+def distcomp(y, x='uniform', bins=100, kind='qq', style='column',
+             ylabel=None, xlabel=None, title=None, size=10):
     """Compare two vectors of different length by creating equal bins.
 
     If kind is qq, the plot is a simple Quantile-Quantile plot, if it is pp,
@@ -66,16 +66,17 @@ def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
 
     Parameters
     ----------
-    actual : Series
+    y (actual|y-axis) : Series
         Series of actual data, will go on y-axis
-    theoretical : Series or string
+    x (theoretical|x-axis) : Series or string
         Series of theoretical data, will go on x-axis, can also be one of
         'normal' or 'uniform', to use a random distribution
     bins : int
         Number of bins to use for plotting, default 1000
-    kind : str
+    kind : {'qq', 'pp', 'cum', 'lin_pp'}
         qq:  Plot a Q-Q plot
-        cum: Plot a cumulative probability plot
+        pp|cum: Plot a cumulative probability plot
+        lin_pp: Plot a probability plot where bins are evenly spaced
     style : str
         simple: Plot a simple scatter plot
         joint: Plot a scatter plot with univariate dists on each axis.
@@ -94,10 +95,15 @@ def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
         Figure and axes always returned, if joint is True, axes
         object will be a seaborn axgrid.
     """
-    if kind not in ['qq', 'cum', 'pp']:
-        raise ValueError('kind must be one of qq or pp (cumulative)')
+    if kind not in ['qq', 'cum', 'pp', 'lin_pp']:
+        raise ValueError('kind must be one of qq, pp, cum, or lin_pp')
     if style not in ['simple', 'joint', 'column', 'scatter']:
         raise ValueError('style must be one of simple, joint, or colummn')
+
+    # Convert to old names
+    theoretical = x
+    actual = y
+
     kind = 'cum' if kind == 'pp' else kind
     style = 'simple' if style == 'scatter' else style
 
@@ -109,14 +115,16 @@ def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
         else:
             raise ValueError('Invalid theoretical')
 
-    x = theoretical
-    y = actual
-
     reg_pp = True  # If false, do a pp plot that is evenly spaced in the hist.
+    if kind is 'lin_pp':
+        kind = 'cum'
+        reg_pp = False
 
     # Choose central plot type
     if kind == 'qq':
         cum = False
+        if not title:
+            title = 'QQ Plot'
         # We use percentiles, so get evenly spaced percentiles from 0% to 100%
         q = np.linspace(0, 100, bins+1)
         xhist = np.percentile(theoretical, q)
@@ -124,21 +132,26 @@ def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
 
     elif kind == 'cum':
         cum = True
-        # Create bins
+        # Create bins from sorted data
+        theoretical_sort = sorted(theoretical)
+        # Bins with approximately equal numbers of points
         if reg_pp:
-            theoretical_sort = sorted(theoretical)
-            boundaries = theoretical_sort[::int(len(theoretical)/bins)]
-            if len(boundaries) < bins:
-                boundaries = theoretical_sort[::round(len(theoretical)/(bins+1))]
-            boundaries.append(theoretical_sort[-1])
+            boundaries = uniform_bins(theoretical_sort, bins)
+            if not title:
+                title = 'Cumulative Probability Plot'
+        # Bins with equal ranges
         else:
             mx = max(np.max(x), np.max(y))
             mx += mx*0.01
             mn = min(np.min(x), np.min(y))
             mn -= mx*0.01
             boundaries = np.linspace(mn, mx, bins+1, endpoint=True)
-        labels = [(boundaries[i]+boundaries[i+1])/2
-                  for i in range(len(boundaries)-1)]
+            if not title:
+                title = 'Linear Spaced Cumulative Probability Plot'
+
+        labels = [
+            (boundaries[i]+boundaries[i+1])/2 for i in range(len(boundaries)-1)
+        ]
 
         # Bin two series into equal bins
         xb = pd.cut(x, bins=boundaries, labels=labels)
@@ -154,6 +167,9 @@ def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
             for idx, val in ser.iteritems():
                 ttl += val
                 ser.loc[idx] = ttl
+
+    xlabel = xlabel if xlabel else 'Theoretical'
+    ylabel = ylabel if ylabel else 'Actual'
 
     # Create figure layout
     if style == 'simple':
@@ -180,8 +196,8 @@ def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
         # Plot extra plots - these ones are traditional histograms
         sns.distplot(actual, ax=ax2, bins=bins)
         sns.distplot(theoretical, ax=ax3, bins=bins)
-        ax2.set_title('Actual')
-        ax3.set_title('Theoretical')
+        ax2.set_title(ylabel)
+        ax3.set_title(xlabel)
         for a in [ax2, ax3]:
             a.set_frame_on(True)
             a.set_xlabel = ''
@@ -192,10 +208,8 @@ def distcomp(actual, theoretical='uniform', bins=100, kind='qq',
 
     # Plot the scatter plot
     ax.scatter(xhist, yhist, label='')
-    xlabel = xlabel if xlabel else 'Theoretical'
-    ylabel = ylabel if ylabel else 'Actual'
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_xlabel(xlabel, fontsize=20)
+    ax.set_ylabel(ylabel, fontsize=20)
 
     # Make the plot a square
     emin = min(np.min(xhist), np.min(yhist))
@@ -303,30 +317,30 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
 
     Parameters
     ----------
-    x : Series
+    x : Series or str if df provided
         X values
-    y : Series
+    y : Series or str if df provided
         Y values
-    xlabel : str
-        A label for the x axis
-    ylabel : str
-        A label for the y axis
-    title : str
+    df : DataFrame, optional
+        If provided, x and y must be strings that are column names
+    xlabel : str, optional
+        A label for the x axis, defaults to x if df provided
+    ylabel : str, optional
+        A label for the y axis, defaults to y if df provided
+    title : str, optional
         Name of the plot
-    pval : float
+    pval : float, optional
         Draw a line at this point*point count
-    labels : Series
+    labels : Series, optional
         Labels to show
-    fig : A pyplot figure
-    ax : A pyplot axes object
-    density : bool
+    density : bool, optional
         Color points by density
-    log_scale : str
+    log_scale : str, optional
         Plot in log scale, can also be 'negative' for
                         negative log scale.
-    legend : str
+    legend : str, optional
         The location to place the legend
-    label_lim : int
+    label_lim : int , optional
         Only show top # labels on each side of the line
     shift_labels:    If True, try to spread labels out. Imperfect.
     highlight_label : Series
@@ -338,6 +352,8 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     scale_factor : float
         A ratio to expand the axes by.
     size : int or tuple
+    fig : pyplot figure, optional
+    ax : pyplot axes object, optional
 
     Returns
     -------
@@ -829,6 +845,41 @@ def manhattan(chrdict, sig_line=0.001, title=None, image_path=None,
 ###############################################################################
 #                              Private Functions                              #
 ###############################################################################
+
+
+def uniform_bins(seq, bins=100):
+    """Returns unique bin edges for an iterable of numbers.
+
+    Note: to make edges unique, drops duplicate edges, for large
+    datasets with many duplicates in a skewed distribution, this
+    could result in fewer bins than requested.
+
+    Params
+    ------
+    seq  : iterable of numbers
+    bins : int
+
+    Returns
+    -------
+    edges : list
+        A list of edges, the first is the first entry of seq, the last
+        is the last entry, all others are approximately evenly sized
+    """
+    avg = len(seq)/float(bins)
+    out = [seq[0]]
+    last = 0.0
+
+    while last < len(seq)-avg:
+        bin_edge = seq[int(last + avg)]
+        if bin_edge not in out:
+            out.append(bin_edge)
+        last += avg
+
+    # Guarantee that right edge is included
+    if seq[-1] not in out:
+        out.append(seq[-1])
+
+    return out
 
 
 def _get_fig_ax(fig, ax, size=9):
