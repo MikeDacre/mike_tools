@@ -7,7 +7,7 @@ Logging with timestamps and optional log files.
         AUTHOR: Michael D Dacre, mike.dacre@gmail.com
   ORGANIZATION: Stanford University
        CREATED: 2015-03-03 11:41
- Last modified: 2016-03-23 18:35
+ Last modified: 2016-03-25 23:40
 
    DESCRIPTION: Print a timestamped message to a logfile, STDERR, or STDOUT.
                 If STDERR or STDOUT are used, colored flags are added.
@@ -182,7 +182,7 @@ def _logit(message, output, level, color=False, min_level=None):
                  5: 'CRITICAL'}
 
     flag = flag_map[level]
-    flag_len = len('{0} | {1} --> '.format(timestamp, flag)) - 2
+    flag_len = len('{0} | {1:<8} --> '.format(timestamp, flag)) - 2
 
     if color:
         flag = _color(flag)
