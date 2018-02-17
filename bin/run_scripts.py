@@ -1,4 +1,4 @@
-#!/share/PI/hbfraser/modules/packages/anaconda3/5.0/bin/python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Run scripts once a day if they haven't been finished yet
@@ -36,7 +36,7 @@ DATA_FILE = os.path.join(
 PI_HOME = os.path.expandvars('$PI_HOME')
 TEMP = os.path.join(os.path.expandvars('$HOME'), '.hbfraser-tmp')
 
-PYTHON_LIB = PI_HOME + '/modules/packages/anaconda3/5.0/lib/python3.6/site-packages'
+PYTHON_LIB = os.path.join(PI_HOME, 'fyrd-isolated')
 
 # Time to delay before rerunning in seconds (12 hours)
 WAIT_TIME = 12*60*60
@@ -152,7 +152,8 @@ def main():
     for script in scripts:
         sub_jobs.append(
             fyrd.submit(
-                'bash ' + script, partition='hbfraser,hns,normal', cores=1, mem=4000,
+                'bash ' + script + ' >/dev/null 2>/dev/null',
+                partition='hbfraser,hns,normal', cores=1, mem=4000,
                 time='18:00:00', outfile='/dev/null', errfile='/dev/null',
                 scriptpath=TEMP, runpath=TEMP, clean_files=True,
                 clean_outputs=True, name=script.split('/')[-1].split('.')[0]
