@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/share/PI/hbfraser/modules/packages/anaconda3/5.0/bin/python
 # -*- coding: utf-8 -*-
 """
 Run scripts once a day if they haven't been finished yet
@@ -9,7 +9,7 @@ if finished is less that 1 day submits a job.
 import os
 import sys
 import json
-from datetime import datetime
+from datetime import datetime as dt
 
 sys.path.append(
     '/share/PI/hbfraser/modules/packages/anaconda3/5.0/lib/python3.6/site-packages'
@@ -25,7 +25,9 @@ DATA_FILE = os.path.join(
 )
 PI_HOME = os.path.expandvars('$PI_HOME')
 
-now = datetime.now()
+# Time handling
+fmt = '%y%m%d-%H:%M:%S'
+now = dt.now()
 
 if os.path.isfile(DATA_FILE):
     with open(DATA_FILE) as fin:
@@ -34,9 +36,10 @@ else:
     last_job = None
 
 # Decide if to run again
-# Don't run is less than 1 day or if old jobs are running
+# Don't run is less than 12 hours or if old jobs are running
 if last_job:
-    if (now-last_job['time']).days < 1:
+    if (now-dt.strptime(last_job['time'], fmt)).seconds < 43000:
+        print('time')
         sys.exit(0)
     queue = fyrd.queue.Queue('self')
     open_jobs = [queue[i] for i in last_job['jobs'] if str(i) in queue.jobs]
@@ -45,24 +48,31 @@ if last_job:
             if job.state in fyrd.queue.ACTIVE_STATES:
                 sys.exit(0)
 
-# Get scripts
-scripts = [
-    os.path.join(PI_HOME, 'shared_environment', i) for i in os.listdir(PI_HOME)
-]
-
 # Create a temp dir just in case
 TEMP = os.path.join(os.path.expandvars('$HOME'), '.tmp')
 if not os.path.isdir(TEMP):
     os.makedirs(TEMP)
+
+# Clean up that dir
+fyrd.clean_dir(TEMP)
+os.system('rm {}/reset_perms* 2>/dev/null'.format(TEMP))
+os.system('rm {}/touch_pi_scratch* 2>/dev/null'.format(TEMP))
+ 
+# Get scripts
+SCRPT_PATH = os.path.join(PI_HOME, 'shared_environment')
+scripts = [
+    os.path.join(SCRPT_PATH, i) for i in ['reset_perms.sh', 'touch_pi_scratch.sh']
+]
 
 # Submit them
 sub_jobs = []
 for script in scripts:
     sub_jobs.append(
         fyrd.submit(
-            'script', partition='hbfraser,hns,normal', cores=1, mem=4000,
+            script, partition='hbfraser,hns,normal', cores=1, mem=4000,
             time='18:00:00', outfile='/dev/null', errfile='/dev/null',
-            scriptpath=TEMP, runpath=TEMP, clean_files=True, clean_outputs=True
+            scriptpath=TEMP, runpath=TEMP, clean_files=True,
+            clean_outputs=True, name=script.split('/')[-1].split('.')[0]
         )
     )
 
@@ -72,7 +82,7 @@ for job in sub_jobs:
     job_ids.append(job.id)
 
 # Write out data
-job_data = {'time': now, 'jobs': job_ids}
+job_data = {'time': now.strftime(fmt), 'jobs': job_ids}
 with open(DATA_FILE, 'w') as fout:
     json.dump(job_data, fout)
 
