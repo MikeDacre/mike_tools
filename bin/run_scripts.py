@@ -36,6 +36,8 @@ DATA_FILE = os.path.join(
 PI_HOME = os.path.expandvars('$PI_HOME')
 TEMP = os.path.join(os.path.expandvars('$HOME'), '.hbfraser-tmp')
 
+PYTHON_LIB = PI_HOME + '/modules/packages/anaconda3/5.0/lib/python3.6/site-packages'
+
 # Time to delay before rerunning in seconds (12 hours)
 WAIT_TIME = 12*60*60
 
@@ -118,12 +120,11 @@ def main():
         if (NOW-dt.strptime(last_job['time'], FMT)).seconds < WAIT_TIME:
             exit_us(0)
 
-        # Only import fyrd when we have to as it can be slow
-        sys.path.append(
-            '/share/PI/hbfraser/modules/packages/anaconda3/5.0/lib/python3.6/site-packages'
-        )
-        import fyrd
+    # Only import fyrd when we have to as it can be slow
+    sys.path.append(PYTHON_LIB)
+    import fyrd
 
+    if last_job:
         queue = fyrd.queue.Queue('self')
         open_jobs = [queue[i] for i in last_job['jobs'] if str(i) in queue.jobs]
         if open_jobs:
