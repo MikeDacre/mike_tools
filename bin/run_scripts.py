@@ -121,7 +121,7 @@ def main():
             exit_us(0)
 
     # Only import fyrd when we have to as it can be slow
-    sys.path.append(PYTHON_LIB)
+    sys.path.insert(0, PYTHON_LIB)
     import fyrd
 
     if last_job:
