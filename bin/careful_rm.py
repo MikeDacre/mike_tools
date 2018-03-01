@@ -1,23 +1,68 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-Execute rm, but be careful about it.
+"""careful_rm, the safe rm wrapper
+
+Will notify if more than a few (defined by CUTOFF) files are deleted, or if
+directories are deleted recursively. Also, provides a recycle option, which
+moves files to the trash can or to /var/$USER_trash.
+
+Recyling can be forced on by the existence of ~/.rm_recycle
+
+Usage: careful_rm [-c] [-f | -i] [-dPRrvW] file ..
+
+Arguments
+---------
+    -c, --recycle         move to trash instead of deleting (forced on by
+                          ~/.rm_recycle)
+        --direct          force off recycling, even if ~/.rm_recycle exists
+    -f, --force           ignore nonexistent files and arguments, never prompt
+    -i                    prompt before every removal
+    -I                    prompt once before removing more than three files, or
+                          when removing recursively
+    -r, -R, --recursive   remove directories and their contents recursively
+    -d, --dir             remove empty directories
+        --dryrun          do not actually remove or move files, just print
+    -v, --verbose         explain what is being done<Paste>
+    -h, --help            display this help and exi
+
+For full help for rm, see `man rm`, note that only the '-i', '-f' and '-v'
+options have any meaning in recycle mode.
 """
 import os
 import sys
 from glob import glob
 from getpass import getuser
-from subprocess import call
+from platform import system
+from subprocess import call, check_output, CalledProcessError
 try:
     from builtins import input
 except ImportError:
     input = raw_input
 
 # Don't ask if fewer than this number of files deleted
-CUTOFF = 2
+CUTOFF = 3
+DOCSTR = '{0}\n\nCutoff: {1}\n'.format(__doc__, str(CUTOFF))
 
-# Where to move files to if recycled
-RECYCLE_BIN = os.path.expandvars('/tmp/{}_trash'.format(getuser()))
+# Print on one line if fewer than this number
+MAX_LINE = 5
+
+# Where to move files to if recycled system-wide
+RECYCLE_BIN = os.path.expandvars('/tmp/{0}_trash'.format(getuser()))
+
+# Home directory recycling
+HOME = os.path.expanduser('~')
+SYSTEM = system()
+if SYSTEM == 'Darwin':
+    HOME_TRASH = os.path.join(HOME, '.Trash')
+elif SYSTEM == 'Linux':
+    HOME_TRASH = os.path.join(HOME, '.local/share/Trash')
+else:
+    HOME_TRASH = RECYCLE_BIN
+if os.path.isdir(HOME_TRASH):
+    HAS_HOME = True
+else:
+    HAS_HOME = False
+    HOME_TRASH = RECYCLE_BIN
 
 
 def yesno(message, def_yes=True):
@@ -29,31 +74,100 @@ def yesno(message, def_yes=True):
     return def_yes
 
 
-def main(argv=sys.argv):
-    """Safe rm"""
+def format_list(input_list):
+    """Print a list as columns matched to the terminal width.
+
+    From: stackoverflow.com/questions/25026556
+    """
+    try:
+        term_width = int(check_output(['tput', 'cols']).decode().strip())
+    except (CalledProcessError, FileNotFoundError, ValueError):
+        term_width = 80
+
+    if len(str(input_list)) < term_width:
+        return str(input_list).strip('[]')
+
+    repr_list = [repr(x) for x in input_list]
+    min_chars_between = 3 # a comma and two spaces
+    usable_term_width = term_width - 2
+    min_element_width = min(len(x) for x in repr_list) + min_chars_between
+    max_element_width = max(len(x) for x in repr_list) + min_chars_between
+    if max_element_width >= usable_term_width:
+        ncol = 1
+        col_widths = [1]
+    else:
+        # Start with max possible number of columns and reduce until it fits
+        ncol = int(min(len(repr_list), usable_term_width/min_element_width))
+        while True:
+            col_widths = [
+                max(
+                    len(x) + min_chars_between \
+                    for j, x in enumerate(repr_list) if j % ncol == i
+                ) for i in range(ncol)
+            ]
+            if sum( col_widths ) <= usable_term_width:
+                break
+            else:
+                ncol -= 1
+
+    outstr = ""
+    for i, x in enumerate(repr_list):
+        if i != len(repr_list)-1: x += ','
+        outstr += x.ljust(col_widths[ i % ncol ])
+        if i == len(repr_list) - 1:
+            outstr += '\n'
+        elif (i+1) % ncol == 0:
+            outstr += '\n'
+
+    return outstr
+
+
+def main(argv=None):
+    """The careful rm function."""
+    if not argv:
+        argv = sys.argv
     if not argv:
         sys.stderr.write(
-            'Arguments required\n'
-            'Usage: rm [--recycle|-c] [options] files\b'
+            'Arguments required\n\n' + DOCSTR
         )
         return 99
     flags = []
+    rec_args = []
     all_files = []
-    recursive = False
-    recycle = False
+    dryrun     = False
+    recursive  = False
+    recycle    = False
+    no_recycle = False
     for arg in sys.argv[1:]:
-        if arg == '--recycle' or arg == '-c':
+        if arg == '-h' or arg == '--help':
+            sys.stderr.write(DOCSTR)
+            return 0
+        elif arg == '--recycle' or arg == '-c':
             recycle = True
+        elif arg == '--direct':
+            recycle = False
+            no_recycle = True
+        elif arg == '--dryrun':
+            dryrun = True
+            sys.stderr.write('Not actually removing files.\n')
+        elif arg == '--':
+            pass
         elif arg.startswith('-'):
-            if 'r' in arg:
+            if 'r' in arg or 'R' in arg:
                 recursive = True
+            if 'f' in arg:
+                rec_args.append('-f')
+            if 'i' in arg:
+                rec_args.append('-i')
+            if 'v' in arg:
+                rec_args.appedn('-v')
             flags.append(arg)
         else:
             all_files += glob(arg)
-    if recycle:
-        sys.stderr.write(
-            'All files will be recycled to {}\n'.format(RECYCLE_BIN)
-        )
+    if os.path.isfile(os.path.join(HOME, '.rm_recycle')):
+        recycle = True
+    if no_recycle:
+        recycle = False
     drs = []
     fls = []
     bad = []
@@ -66,7 +180,7 @@ def main(argv=sys.argv):
             bad.append(fl)
     if bad:
         sys.stderr.write(
-            'The following files do not match any files\n{}\n'
+            'The following files do not match any files\n{0}\n'
             .format(' '.join(bad))
         )
     ld = len(drs)
@@ -83,18 +197,18 @@ def main(argv=sys.argv):
             if dc or fc:
                 info = []
                 if fc:
-                    info.append('{} subfiles'.format(fc))
+                    info.append('{0} subfiles'.format(fc))
                 if dc:
-                    info.append('{} subfolders'.format(dc))
+                    info.append('{0} subfolders'.format(dc))
             inf = ' and '.join(info)
             msg = 'Recursively deleting '
-            if ld < 6:
-                msg += 'the folders {}'.format(drs)
+            if ld < MAX_LINE:
+                msg += 'the folders {0}'.format(drs)
                 if info:
                     msg += ' with ' + inf
             else:
-                msg += '{} dirs:'.format(ld)
-                msg += '\n{}\n'.format(' '.join(drs))
+                msg += '{0} dirs:'.format(ld)
+                msg += '\n{0}\n'.format(format_list(drs))
                 if info:
                     msg += 'Containing ' + inf
                 else:
@@ -103,27 +217,27 @@ def main(argv=sys.argv):
             if not yesno('Really delete?', False):
                 return 1
     elif drs:
-        if ld < 6:
+        if ld < MAX_LINE:
             sys.stderr.write(
-                'Directories {} included but -r not sent\n'
+                'Directories {0} included but -r not sent\n'
                 .format(drs)
             )
         else:
             sys.stderr.write(
-                '{} directories included but -r not sent\n'
+                '{0} directories included but -r not sent\n'
                 .format(len(drs))
             )
         if not yesno('Continue anyway?'):
             return 2
         drs = []
     if len(fls) >= CUTOFF:
-        if len(fls) < 6:
-            if not yesno('Delete the files {}?'.format(fls), False):
+        if len(fls) < MAX_LINE:
+            if not yesno('Delete the files {0}?'.format(fls), False):
                 return 6
         else:
             sys.stderr.write(
-                'Deleting the following {} files:\n{}\n'
-                .format(len(fls), ' '.join(fls))
+                'Deleting the following {0} files:\n{1}\n'
+                .format(len(fls), format_list(fls))
             )
             if not yesno('Delete?', False):
                 return 10
@@ -135,14 +249,32 @@ def main(argv=sys.argv):
     if recycle:
         if not os.path.isdir(RECYCLE_BIN):
             os.makedirs(RECYCLE_BIN)
-        return call(
-            'mv -i {} {}'.format(' '.join(to_delete), RECYCLE_BIN),
-            shell=True
+        # Default to /tmp, use home if Mac OS or if Linux and in the HOME
+        # directory (all paths must be inside home, usually true)
+        rec_bin = RECYCLE_BIN
+        if HAS_HOME:
+            if SYSTEM == 'Darwin':
+                rec_bin = HOME_TRASH
+            else:
+                home_count = 0
+                for fl in drs + fls:
+                    if os.path.abspath(fl).startswith(HOME):
+                        home_count += 1
+                if home_count == len(to_delete):
+                    rec_bin = HOME_TRASH
+        cmnd = 'mv {0} {1} {2}'.format(
+            ' '.join(rec_args), ' '.join(to_delete), rec_bin
         )
-    return call(
-        'rm {}'.format(' '.join(flags + to_delete)),
-        shell=True
-    )
+        if not dryrun:
+            sys.stderr.write(
+                'All files will be recycled to {0}\n'.format(rec_bin)
+            )
+    else:
+        cmnd = 'rm {0}'.format(' '.join(flags + to_delete))
+    if dryrun:
+        sys.stdout.write('Command: {0}\n'.format(cmnd))
+        return 0
+    return call(cmnd, shell=True)
 
 
 if __name__ == '__main__' and '__file__' in globals():
