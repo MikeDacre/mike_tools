@@ -125,6 +125,7 @@ def main(argv=sys.argv):
             if not yesno('Delete?', False):
                 return 10
     to_delete = drs + fls
+    to_delete = ['"' + i + '"' for i in to_delete]
     if not to_delete:
         sys.stderr.write('No files or folders to delete\n')
         return 22
