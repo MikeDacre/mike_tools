@@ -8,25 +8,37 @@ moves files to the trash can or to /var/$USER_trash.
 
 Recyling can be forced on by the existence of ~/.rm_recycle
 
-Usage: careful_rm [-c] [-f | -i] [-dPRrvW] file ..
+Usage: careful_rm.py [-c] [-f | -i] [-dPRrvW] file ..
 
 Arguments
 ---------
     -c, --recycle         move to trash instead of deleting (forced on by
                           ~/.rm_recycle)
         --direct          force off recycling, even if ~/.rm_recycle exists
+        --dryrun          do not actually remove or move files, just print
+    -h, --help            display this help and exit
+
+Arguments Passed to rm
+----------------------
     -f, --force           ignore nonexistent files and arguments, never prompt
     -i                    prompt before every removal
     -I                    prompt once before removing more than three files, or
                           when removing recursively
     -r, -R, --recursive   remove directories and their contents recursively
     -d, --dir             remove empty directories
-        --dryrun          do not actually remove or move files, just print
-    -v, --verbose         explain what is being done<Paste>
-    -h, --help            display this help and exi
+    -v, --verbose         explain what is being done
 
 For full help for rm, see `man rm`, note that only the '-i', '-f' and '-v'
-options have any meaning in recycle mode.
+options have any meaning in recycle mode, which uses `mv`. Argument order does
+not matter.
+
+This tool should ideally be aliased to rm, add this to your bashrc/zshrc:
+
+    if hash careful_rm.py 2>/dev/null; then
+        alias rm="$(command -v careful_rm.py)"
+    else
+        alias rm="rm -I"
+    fi
 """
 import os
 import sys
@@ -39,9 +51,11 @@ try:
 except ImportError:
     input = raw_input
 
+__version__ = '1.0b1'
+
 # Don't ask if fewer than this number of files deleted
 CUTOFF = 3
-DOCSTR = '{0}\n\nCutoff: {1}\n'.format(__doc__, str(CUTOFF))
+DOCSTR = '{0}\nWARNING CUTOFF: {1}\n'.format(__doc__, str(CUTOFF))
 
 # Print on one line if fewer than this number
 MAX_LINE = 5
@@ -131,6 +145,7 @@ def main(argv=None):
             'Arguments required\n\n' + DOCSTR
         )
         return 99
+    file_sep = '--'  # Used to separate files from args, change to '' if needed
     flags = []
     rec_args = []
     all_files = []
@@ -138,7 +153,7 @@ def main(argv=None):
     recursive  = False
     recycle    = False
     no_recycle = False
-    for arg in sys.argv[1:]:
+    for arg in argv[1:]:
         if arg == '-h' or arg == '--help':
             sys.stderr.write(DOCSTR)
             return 0
@@ -151,7 +166,13 @@ def main(argv=None):
             dryrun = True
             sys.stderr.write('Not actually removing files.\n')
         elif arg == '--':
-            pass
+            # Everything after this is a file
+            file_sep = '--'
+            all_files += [
+                i for l in [glob(n) for n in argv[argv.index(arg):]] \
+                for i in l
+            ]
+            break
         elif arg.startswith('-'):
             if 'r' in arg or 'R' in arg:
                 recursive = True
@@ -262,15 +283,17 @@ def main(argv=None):
                         home_count += 1
                 if home_count == len(to_delete):
                     rec_bin = HOME_TRASH
-        cmnd = 'mv {0} {1} {2}'.format(
-            ' '.join(rec_args), ' '.join(to_delete), rec_bin
+        cmnd = 'mv {0} {1} {2} "{3}"'.format(
+            ' '.join(rec_args), file_sep, ' '.join(to_delete), rec_bin
         )
         if not dryrun:
             sys.stderr.write(
                 'All files will be recycled to {0}\n'.format(rec_bin)
             )
     else:
-        cmnd = 'rm {0}'.format(' '.join(flags + to_delete))
+        cmnd = 'rm {0} {1} {2}'.format(
+            ' '.join(flags), file_sep, ' '.join(to_delete)
+        )
     if dryrun:
         sys.stdout.write('Command: {0}\n'.format(cmnd))
         return 0
