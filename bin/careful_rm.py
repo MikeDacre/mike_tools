@@ -7,8 +7,11 @@ import os
 import sys
 from glob import glob
 from getpass import getuser
-from builtins import input
 from subprocess import call
+try:
+    from builtins import input
+except ImportError:
+    input = raw_input
 
 # Don't ask if fewer than this number of files deleted
 CUTOFF = 2
