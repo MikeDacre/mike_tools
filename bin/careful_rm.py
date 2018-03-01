@@ -126,7 +126,8 @@ def format_list(input_list):
 
     outstr = ""
     for i, x in enumerate(repr_list):
-        if i != len(repr_list)-1: x += ','
+        if i != len(repr_list)-1:
+            x += ','
         outstr += x.ljust(col_widths[ i % ncol ])
         if i == len(repr_list) - 1:
             outstr += '\n'
@@ -150,8 +151,9 @@ def main(argv=None):
     rec_args = []
     all_files = []
     dryrun     = False
-    recursive  = False
     recycle    = False
+    verbose    = False
+    recursive  = False
     no_recycle = False
     for arg in argv[1:]:
         if arg == '-h' or arg == '--help':
@@ -181,7 +183,8 @@ def main(argv=None):
             if 'i' in arg:
                 rec_args.append('-i')
             if 'v' in arg:
-                rec_args.appedn('-v')
+                verbose = True
+                rec_args.append('-v')
             flags.append(arg)
         else:
             all_files += glob(arg)
@@ -189,6 +192,11 @@ def main(argv=None):
         recycle = True
     if no_recycle:
         recycle = False
+    if verbose:
+        if recycle:
+            sys.stderr.write('Using recycle instead of remove\n')
+        else:
+            sys.stderr.write('Using remove instead of recycle\n')
     drs = []
     fls = []
     bad = []
@@ -205,6 +213,11 @@ def main(argv=None):
             .format(' '.join(bad))
         )
     ld = len(drs)
+    if verbose:
+        sys.stderr.write(
+            'Have {0} dirs, {1} files, and {2} non-existent\n'
+            .format(ld, len(fls), len(bad))
+        )
     if recursive:
         if drs:
             dc = 0
@@ -264,6 +277,8 @@ def main(argv=None):
                 return 10
     to_delete = drs + fls
     to_delete = ['"' + i + '"' for i in to_delete]
+    if verbose:
+        sys.stderr.write('Have {0} files to delete\n'.format(len(to_delete)))
     if not to_delete:
         sys.stderr.write('No files or folders to delete\n')
         return 22
@@ -294,9 +309,9 @@ def main(argv=None):
         cmnd = 'rm {0} {1} {2}'.format(
             ' '.join(flags), file_sep, ' '.join(to_delete)
         )
-    if dryrun:
+    if dryrun or verbose:
         sys.stdout.write('Command: {0}\n'.format(cmnd))
-        return 0
+        if dryrun: return 0
     return call(cmnd, shell=True)
 
 
