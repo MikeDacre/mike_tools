@@ -8,7 +8,7 @@ Filter all snps in a bed or vcf file, return those in region of another bed.
        LICENSE: MIT License, property of Stanford, use as you wish
        VERSION: 0.1
        CREATED: 2016-51-16 15:03
- Last modified: 2016-03-16 18:25
+ Last modified: 2016-06-08 13:43
 
    DESCRIPTION:
 
@@ -21,8 +21,112 @@ import re
 import bz2
 import gzip
 import sqlite3
-import bed_lookup
+from subprocess import check_output
 import logme
+
+class BedFile(object):
+
+    """Simple bed file object iterator."""
+
+    class Entry(object):
+
+        """A bed file row."""
+
+        class Exon(object):
+
+            """ An exon."""
+
+            def __init__(self, start, end):
+                """Create the exon."""
+                self.start = start
+                self.end   = end
+
+            def __repr__(self):
+                """Basic info."""
+                return "Exon<start:{};end:{}>".format(self.start, self.end)
+
+        def __init__(self, bed_line, snp=False):
+            """Where bed_line is a list of items in the bed line."""
+            self.chrom = bed_line[0]
+            self.start = int(bed_line[1])
+            self.end   = int(bed_line[2])
+            if snp and len(bed_line) > 3:
+                self.name  = 'SNP'
+                if '|' in bed_line[3]:
+                    self.ref, self.alt = bed_line[3].split('|')
+                    self.phased = True
+                elif '/' in bed_line[3]:
+                    self.ref, self.alt = bed_line[3].split('/')
+                    self.phased = False
+            else:
+                self.name  = bed_line[3] if len(bed_line) > 3 else None
+            self.score = bed_line[4] if len(bed_line) > 4 else None
+            self.strand = bed_line[5] if len(bed_line) > 5 else None
+            self.t_start = int(bed_line[6]) if len(bed_line) > 6 else None
+            self.t_end = int(bed_line[7]) if len(bed_line) > 7 else None
+            self.rgb = bed_line[8] if len(bed_line) > 8 else None
+            if len(bed_line) > 9:
+                self.exons = []
+                self.len = int(bed_line[9])
+                if self.len:
+                    sizes = bed_line[10].rstrip(',').split(',')
+                    starts = bed_line[11].rstrip(',').split(',')
+                    for i, j in zip(starts, sizes):
+                        start = self.start + int(i)
+                        end   = start + int(j)
+                        self.exons.append(self.Exon(start, end))
+                    assert len(self.exons) == self.len
+            else:
+                self.len = 0
+
+        def __repr__(self):
+            """Basic info."""
+            retstr = "{name}({chrom}:{start}-{end})".format(
+                name=self.name if self.name else 'bed_line', chrom=self.chrom,
+                start=self.start, end=self.end)
+            if self.name:
+                if self.name == 'SNP':
+                    sep = '|' if self.phased else '/'
+                    retstr +=('{}{}{}'.format(self.ref, sep, self.alt))
+                else:
+                    retstr += ("<strand:{strand};score:{score};exons:{exons}>"
+                               .format(strand=self.strand, score=self.score,
+                                       exons=self.len))
+            return retstr
+
+    def __init__(self, bedfile, snp=False):
+        """Create self with bedfile. Can be zipped.
+
+        If snp is true name column is treated as ref|alt.
+        """
+        self.file = os.path.abspath(bedfile)
+        self.len  = int(check_output(['wc', '-l', self.file]).decode().split(' ')[0])
+        self.snp  = snp
+        with open(self.file) as fin:
+            if len(fin.readline().split('\t')) > 3:
+                self.type = 'extended'
+            else:
+                self.type = 'simple'
+        self.line = None
+        self.lineno = 0
+
+    def __iter__(self):
+        """Stupid function."""
+        return self
+
+    def __next__(self):
+        """Make self iterable."""
+        with open_zipped(self.file) as fin:
+            for line in fin:
+                self.lineno += 1
+                self.line = line.rstrip().split('\t')
+                self.entry = self.Entry(self.line, self.snp)
+                return self.entry
+
+    def __repr__(self):
+        """Useful info."""
+        return "BedFile({}) Line: {} of {}".format(self.type, self.lineno,
+                                                   self.len)
 
 
 def sqlite_from_bed(bedfile):
