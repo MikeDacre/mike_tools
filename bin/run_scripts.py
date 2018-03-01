@@ -34,8 +34,10 @@ DATA_FILE = os.path.join(
     '.fraser_lab_scripts.json'
 )
 PI_HOME = os.path.expandvars('$PI_HOME')
+SCRPT_PATH = os.path.join(PI_HOME, 'shared_environment')
 TEMP = os.path.join(os.path.expandvars('$HOME'), '.hbfraser-tmp')
 
+# This will have to change when anaconda is updated
 PYTHON_LIB = PI_HOME + '/modules/packages/anaconda3/5.0/lib/python3.6/site-packages'
 
 # Time to delay before rerunning in seconds (12 hours)
@@ -142,7 +144,6 @@ def main():
     os.system('rm {}/touch_pi_scratch* 2>/dev/null'.format(TEMP))
 
     # Get scripts
-    SCRPT_PATH = os.path.join(PI_HOME, 'shared_environment')
     scripts = [
         os.path.join(SCRPT_PATH, i) for i in ['reset_perms.sh', 'touch_pi_scratch.sh']
     ]
@@ -182,10 +183,10 @@ def main():
 # Fork this into the background
 fpid = os.fork()
 
-if (fpid == 0):
+if fpid == 0:
     os.setsid()
     fpid2 = os.fork()
-    if (fpid2 == 0):
+    if fpid2 == 0:
         # We are the second child, so we can do things
         sys.exit(main())
     else:
