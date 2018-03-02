@@ -42,6 +42,7 @@ This tool should ideally be aliased to rm, add this to your bashrc/zshrc:
 """
 import os
 import sys
+import signal
 from glob import glob
 from getpass import getuser
 from platform import system
@@ -79,6 +80,24 @@ if os.path.isdir(HOME_TRASH):
 else:
     HAS_HOME = False
     HOME_TRASH = RECYCLE_BIN
+
+
+###############################################################################
+#                         Catch Keyboard Interruption                         #
+###############################################################################
+
+
+def catch_keyboard(sig, frame):
+    """Catch Keyboard Interruption."""
+    sys.stderr.write('\nKeyboard Interrupt Detected, Exiting\n')
+    sys.exit(1)
+
+signal.signal(signal.SIGINT, catch_keyboard)
+
+
+###############################################################################
+#                              Helper Functions                               #
+###############################################################################
 
 
 def yesno(message, def_yes=True):
@@ -135,6 +154,11 @@ def format_list(input_list):
     return outstr
 
 
+###############################################################################
+#                                Core Function                                #
+###############################################################################
+
+
 def main(argv=None):
     """The careful rm function."""
     if not argv:
@@ -144,6 +168,8 @@ def main(argv=None):
             'Arguments required\n\n' + DOCSTR
         )
         return 99
+
+    # Tracking
     file_sep = '--'  # Used to separate files from args, change to '' if needed
     flags = []
     rec_args = []
@@ -153,6 +179,8 @@ def main(argv=None):
     verbose    = False
     recursive  = False
     no_recycle = False
+
+    # Argument parsing
     for arg in argv[1:]:
         if arg == '-h' or arg == '--help':
             sys.stderr.write(DOCSTR)
@@ -186,15 +214,26 @@ def main(argv=None):
             flags.append(arg)
         else:
             all_files += glob(arg)
+
+    # Recycle control
     if os.path.isfile(os.path.join(HOME, '.rm_recycle')):
         recycle = True
+    elif os.path.isfile(os.path.join(HOME, '.rm_recycle_home')):
+        recycle_home = True
+
     if no_recycle:
         recycle = False
+        recycle_home = False
+
     if verbose:
         if recycle:
             sys.stderr.write('Using recycle instead of remove\n')
+        elif recycle_home:
+            sys.stderr.write('Using recycle instead of remove for HOME only\n')
         else:
             sys.stderr.write('Using remove instead of recycle\n')
+
+    # Separate into files and directories
     drs = []
     fls = []
     bad = []
@@ -217,7 +256,7 @@ def main(argv=None):
             .format(ld, len(fls), len(bad))
         )
 
-    # Directories
+    # Warn for Directories
     if not recursive and ld:
         if ld < MAX_LINE:
             sys.stderr.write(
@@ -234,6 +273,7 @@ def main(argv=None):
             recursive = True
         else:
             drs = []
+
     if recursive:
         if drs:
             dc = 0
@@ -265,9 +305,10 @@ def main(argv=None):
                     msg += 'Containing no subfiles or directories'
             sys.stderr.write(msg + '\n')
             if not yesno('Really delete?', False):
+                # Continue with no dirs
                 drs = []
 
-    # Files
+    # Warn for Files
     if len(fls) >= CUTOFF:
         if len(fls) < MAX_LINE:
             if not yesno('Delete the files {0}?'.format(fls), False):
