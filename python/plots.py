@@ -34,7 +34,7 @@ _warn.simplefilter(action='ignore', category=RuntimeWarning)
 ###############################################################################
 
 
-def distcomp(y, x='uniform', bins=100, kind='qq', style='column',
+def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
              ylabel=None, xlabel=None, title=None, size=10):
     """Compare two vectors of different length by creating equal bins.
 
@@ -68,25 +68,25 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style='column',
     ----------
     y (actual|y-axis) : Series
         Series of actual data, will go on y-axis
-    x (theoretical|x-axis) : Series or string
+    x (theoretical|x-axis) : Series or string, optional
         Series of theoretical data, will go on x-axis, can also be one of
         'normal' or 'uniform', to use a random distribution
-    bins : int
+    bins : int, optional
         Number of bins to use for plotting, default 1000
-    kind : {'qq', 'pp', 'cum', 'lin_pp'}
+    kind : {'qq', 'pp', 'cum', 'lin_pp'}, optional
         qq:  Plot a Q-Q plot
         pp|cum: Plot a cumulative probability plot
         lin_pp: Plot a probability plot where bins are evenly spaced
-    style : str
+    style : str, optional
         simple: Plot a simple scatter plot
         joint: Plot a scatter plot with univariate dists on each axis.
         column: Plot a scatter plot with univariate histograms, separately
         calculated, on the side.
-    {y/x}label : str
+    {y/x}label : str, optional
         Optional label for y/x axis. y=Actual, x=Theretical
-    title : str
+    title : str, optional
         Optional title for the whole plot
-    size : int
+    size : int, optional
         A size to use for the figure, square is forced.
 
     Returns
@@ -97,6 +97,13 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style='column',
     """
     if kind not in ['qq', 'cum', 'pp', 'lin_pp']:
         raise ValueError('kind must be one of qq, pp, cum, or lin_pp')
+
+    if not style:
+        if kind is 'qq':
+            style = 'simple'
+        else:
+            style = 'joint'
+
     if style not in ['simple', 'joint', 'column', 'scatter']:
         raise ValueError('style must be one of simple, joint, or colummn')
 
