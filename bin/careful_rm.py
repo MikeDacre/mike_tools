@@ -55,7 +55,9 @@ __version__ = '1.0b1'
 
 # Don't ask if fewer than this number of files deleted
 CUTOFF = 3
-DOCSTR = '{0}\nWARNING CUTOFF: {1}\n'.format(__doc__, str(CUTOFF))
+DOCSTR = '{0}\nCUTOFF: {1} (More than this = warning)\n'.format(
+    __doc__, str(CUTOFF)
+)
 
 # Print on one line if fewer than this number
 MAX_LINE = 5
@@ -69,7 +71,7 @@ SYSTEM = system()
 if SYSTEM == 'Darwin':
     HOME_TRASH = os.path.join(HOME, '.Trash')
 elif SYSTEM == 'Linux':
-    HOME_TRASH = os.path.join(HOME, '.local/share/Trash')
+    HOME_TRASH = os.path.join(HOME, '.local/share/Trash/files')
 else:
     HOME_TRASH = RECYCLE_BIN
 if os.path.isdir(HOME_TRASH):
@@ -95,14 +97,14 @@ def format_list(input_list):
     """
     try:
         term_width = int(check_output(['tput', 'cols']).decode().strip())
-    except (CalledProcessError, FileNotFoundError, ValueError):
+    except (CalledProcessError, OSError, ValueError):
         term_width = 80
 
     if len(str(input_list)) < term_width:
-        return str(input_list).strip('[]')
+        return '  '.join(input_list)
 
-    repr_list = [repr(x) for x in input_list]
-    min_chars_between = 3 # a comma and two spaces
+    repr_list = [str(x) for x in input_list]
+    min_chars_between = 2
     usable_term_width = term_width - 2
     min_element_width = min(len(x) for x in repr_list) + min_chars_between
     max_element_width = max(len(x) for x in repr_list) + min_chars_between
@@ -126,12 +128,8 @@ def format_list(input_list):
 
     outstr = ""
     for i, x in enumerate(repr_list):
-        if i != len(repr_list)-1:
-            x += ','
         outstr += x.ljust(col_widths[ i % ncol ])
-        if i == len(repr_list) - 1:
-            outstr += '\n'
-        elif (i+1) % ncol == 0:
+        if i == len(repr_list)-1 or (i+1) % ncol == 0:
             outstr += '\n'
 
     return outstr
@@ -218,6 +216,24 @@ def main(argv=None):
             'Have {0} dirs, {1} files, and {2} non-existent\n'
             .format(ld, len(fls), len(bad))
         )
+
+    # Directories
+    if not recursive and ld:
+        if ld < MAX_LINE:
+            sys.stderr.write(
+                'Directories {0} included but -r not sent\n'
+                .format(drs)
+            )
+        else:
+            sys.stderr.write(
+                '{0} directories included but -r not sent\n'
+                .format(len(drs))
+            )
+        if yesno('Add -r flag (will ignored dirs if not)?', False):
+            flags.append('-r')
+            recursive = True
+        else:
+            drs = []
     if recursive:
         if drs:
             dc = 0
@@ -249,25 +265,9 @@ def main(argv=None):
                     msg += 'Containing no subfiles or directories'
             sys.stderr.write(msg + '\n')
             if not yesno('Really delete?', False):
-                return 1
-    elif drs:
-        if ld < MAX_LINE:
-            sys.stderr.write(
-                'Directories {0} included but -r not sent\n'
-                .format(drs)
-            )
-        else:
-            sys.stderr.write(
-                '{0} directories included but -r not sent\n'
-                .format(len(drs))
-            )
-        if not yesno('Continue anyway?'):
-            return 2
-        if yesno('Add -r flag?'):
-            flags.append('-r')
-            recursive = True
-        else:
-            drs = []
+                drs = []
+
+    # Files
     if len(fls) >= CUTOFF:
         if len(fls) < MAX_LINE:
             if not yesno('Delete the files {0}?'.format(fls), False):
@@ -278,7 +278,9 @@ def main(argv=None):
                 .format(len(fls), format_list(fls))
             )
             if not yesno('Delete?', False):
-                return 10
+                fls = []
+
+    # Deletion
     to_delete = drs + fls
     to_delete = ['"' + i + '"' for i in to_delete]
     if verbose:
