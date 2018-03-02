@@ -263,7 +263,11 @@ def main(argv=None):
             )
         if not yesno('Continue anyway?'):
             return 2
-        drs = []
+        if yesno('Add -r flag?'):
+            flags.append('-r')
+            recursive = True
+        else:
+            drs = []
     if len(fls) >= CUTOFF:
         if len(fls) < MAX_LINE:
             if not yesno('Delete the files {0}?'.format(fls), False):
