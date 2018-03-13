@@ -726,53 +726,51 @@ def boxplot(data, ylabel, title, box_width=0.35, log_scale=False,
 ###############################################################################
 
 
-def manhattan(chrdict, sig_line=0.001, title=None, image_path=None,
-              colors='bgrcmyk', log_scale=True, line_graph=False):
-    """
-    Description: Plot a manhattan plot from a dictionary of
-                 'chr'->(pos, p-value) with a significance line drawn at
-                 the significance point defined by sig_line, which is then
-                 corrected for multiple hypothesis testing.
+def manhattan(chrdict, title=None, xlabel='genome', ylabel='values',
+              colors='bgrcmyk', log_scale=False, line_graph=False,
+              sig_line=None, ax=None):
+    """Plot a manhattan plot from a dictionary of 'chr'->(pos, #).
 
     https://github.com/brentp/bio-playground/blob/master/plots/manhattan-plot.py
 
-    Args:
-        chrdict (dict):    A dictionary of {'chrom': [(position, p-value),..]}
-        sigline (float):   A signficance line (will be corrected for multiple
-                           hypothesis testing
-        title (str):       A title for the plot
-        image_path (str):  A path to write an image to (if desired)
-        colors (str):      A string of colors (described below) to alternate
-                           through while plotting different chromosomes.
-        log_scale (bool):  Use a log scale for plotting (sensible)
-        line_graph (bool): Plot as lines instead of points (not sensible)
-
-    Options:
-        If image_path is given, save at that image (still returns pyplot obj)
-
-        sig_line is the point at which to plot the significance line, it is
-                corrected for multiple testing by dividing it by the number
-                of tests. Default is 0.001.
-
-        Possible colors for colors string:
-                            b: blue
-                            g: green
-                            r: red
-                            c: cyan
-                            m: magenta
-                            y: yellow
-                            k: black
-                            w: white
-
-        If log_scale is True, -log10 is used for p-value scaling otherwise
-        raw p-values will be used, there is no good reason not to use -log10.
-
+    Params
+    ------
+    chrdict : dict
+        A dictionary of {'chrom': [(position, p-value),..]}
+    title : str, optional
+        A title for the plot
+    {x/y}label : str, optional
+        Optional label for y/x axis.
+    colors : str, optional
+        A string of colors (described below) to alternate through while
+        plotting different chromosomes, colors:
+            b: blue
+            g: green
+            r: red
+            c: cyan
+            m: magenta
+            y: yellow
+            k: black
+            w: white
+    log_scale : bool, optional
+        Use a log scale for plotting, if True, -log10 is used for p-value
+        scaling otherwise raw values will be used, should be used for p-values
+        only.
+    sigline : float, optional
+        The point at which to plot the significance line, it is corrected for
+        multiple testing by dividing it by the number of tests. Default is
+        None, which means no line is plotted.
+    line_graph : bool, optional
         If line_graph is True, the data will be plotted as lines instead of
         a scatter plot (not recommended).
+    ax : matplotlib ax object, optional
+        Pre-created ax object, should be initialized as:
+            figure.add_axes((0.1, 0.09, 0.88, 0.85))
 
-    Returns:
-        A matplotlib.pyplot.figure() object
-
+    Returns
+    --------
+    plot : figure or ax object
+        An ax object with the plot if ax is provided, otherwise a figure
     """
 
     xs = []
@@ -809,17 +807,22 @@ def manhattan(chrdict, sig_line=0.001, title=None, image_path=None,
     xs = np.array(xs)
     ys = -np.log10(ys) if log_scale else np.array(ys)
 
-    plt.close()  # Make sure we don't overlap the plots
-    f = plt.figure()
-    ax = f.add_axes((0.1, 0.09, 0.88, 0.85))  # Define axes boundaries
+    # Get the matplotlib object
+    retfig = False
+    if not ax:
+        retfig = True
+        f = plt.figure()
+        ax = f.add_axes((0.1, 0.09, 0.88, 0.85))  # Define axes boundaries
 
     # Set a title
     if title:
         plt.title(title)
 
+    # Labels
     ylabel_scale = ' (-log10)' if log_scale else ' (raw)'
-    ylabel = 'p-values' + ylabel_scale
+    ylabel = ylabel + ylabel_scale
     ax.set_ylabel(ylabel)
+    ax.set_xlabel(xlabel)
 
     # Actually plot the data
     if line_graph:
@@ -828,10 +831,11 @@ def manhattan(chrdict, sig_line=0.001, title=None, image_path=None,
         ax.scatter(xs, ys, s=2, c=cs, alpha=0.8, edgecolors='none')
 
     # plot significance line after multiple testing.
-    sig_line = sig_line/len(data)
-    if log_scale:
-        sig_line = -np.log10(sig_line)
-    ax.axhline(y=sig_line, color='0.5', linewidth=2)
+    if sig_line:
+        sig_line = sig_line/len(data)
+        if log_scale:
+            sig_line = -np.log10(sig_line)
+        ax.axhline(y=sig_line, color='0.5', linewidth=2)
 
     # Plot formatting
     ymax = np.max(ys)
@@ -843,10 +847,10 @@ def manhattan(chrdict, sig_line=0.001, title=None, image_path=None,
                [c[0] for c in xs_by_chr],
                rotation=-90, size=8.5)
 
-    # Save if requested
-    if image_path:
-        plt.savefig(image_path)
-    return f
+    # Return a figure if axes were not provided
+    if retfig:
+        return f
+    return ax
 
 
 ###############################################################################
