@@ -70,7 +70,9 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
         Series of actual data, will go on y-axis
     x (theoretical|x-axis) : Series or string, optional
         Series of theoretical data, will go on x-axis, can also be one of
-        'normal' or 'uniform', to use a random distribution
+        'normal', 'uniform', or 'pvalue', to use a random distribution.
+        The only difference between 'uniform' and 'pvalue' is that pvalue
+        min=0 and max=1, while the uniform dist min=min(y) and max=max(y)
     bins : int, optional
         Number of bins to use for plotting, default 1000
     kind : {'qq', 'pp', 'cum', 'lin_pp'}, optional
@@ -116,9 +118,13 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
 
     if isinstance(theoretical, str):
         if theoretical == 'normal':
-            theoretical = np.random.normal(len(actual))
-        elif theoretical == 'uniform':
-            theoreticcal = np.random.random_sample(len(actual))
+            theoretical = np.random.standard_normal(len(actual))
+        elif theoretical == 'uniform' or theoretical == 'random':
+            theoretical = np.random.uniform(
+                np.min(actual), np.max(actual), len(actual)
+            )
+        elif theoretical == 'pvalue' or theoretical == 'p':
+            theoretical = np.random.random_sample(len(actual))
         else:
             raise ValueError('Invalid theoretical')
 
@@ -839,7 +845,10 @@ def manhattan(chrdict, title=None, xlabel='genome', ylabel='values',
 
     # Plot formatting
     ymax = np.max(ys)
-    ymax = max(ymax + ymax*0.1, sig_line + sig_line*0.1)
+    if sig_line:
+        ymax = max(ymax + ymax*0.1, sig_line + sig_line*0.1)
+    else:
+        ymax += ymax*0.1
     plt.axis('tight')  # Puts chromsomes right next to each other
     plt.xlim(0, xs[-1])  # Eliminate negative axis and extra whitespace
     plt.ylim(0, ymax)  # Eliminate negative axis
