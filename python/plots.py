@@ -34,7 +34,7 @@ _warn.simplefilter(action='ignore', category=RuntimeWarning)
 ###############################################################################
 
 
-def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
+def distcomp(y, x=None, bins=100, kind='qq', style=None,
              ylabel=None, xlabel=None, title=None, size=10):
     """Compare two vectors of different length by creating equal bins.
 
@@ -68,15 +68,20 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
     ----------
     y (actual|y-axis) : Series
         Series of actual data, will go on y-axis
-    x (theoretical|x-axis) : Series or string, optional
+    x (theoretical|x-axis) : Series or {'normal', 'uniform', 'pvalue'}, optional
         Series of theoretical data, will go on x-axis, can also be one of
-        'normal', 'uniform', or 'pvalue', to use a random distribution.
-        The only difference between 'uniform' and 'pvalue' is that pvalue
-        min=0 and max=1, while the uniform dist min=min(y) and max=max(y)
+        'normal', 'uniform', or 'pvalue', to use a random distribution of the
+        same length as the y data.
+        normal: will use a normal distribution anchored at the mean of y,
+        with a scope of the standard deviation of y.
+        uniform: will use a uniform distribution min(y) >= dist <= max(y)
+        pvalue: will use a uniform distribution between 0 and 1
+        Defaults to 'pvalue' if kind='qq_log' else 'normal'
     bins : int, optional
-        Number of bins to use for plotting, default 1000
-    kind : {'qq', 'pp', 'cum', 'lin_pp'}, optional
+        Number of bins to use for plotting
+    kind : {'qq', 'qq_log', 'pp', 'cum', 'lin_pp'}, optional
         qq:  Plot a Q-Q plot
+        qq_log:  Plot a Q-Q plot of -log10(pvalues)
         pp|cum: Plot a cumulative probability plot
         lin_pp: Plot a probability plot where bins are evenly spaced
     style : str, optional
@@ -97,14 +102,20 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
         Figure and axes always returned, if joint is True, axes
         object will be a seaborn axgrid.
     """
-    if kind not in ['qq', 'cum', 'pp', 'lin_pp']:
-        raise ValueError('kind must be one of qq, pp, cum, or lin_pp')
+    if kind not in ['qq', 'qq_log', 'cum', 'pp', 'lin_pp']:
+        raise ValueError('kind must be one of qq, qq_log, pp, cum, or lin_pp')
 
     if not style:
-        if kind is 'qq':
+        if kind is 'qq' or kind is 'qq_log':
             style = 'simple'
         else:
             style = 'joint'
+
+    if not y:
+        if kind is 'qq_log':
+            y = 'pvalue'
+        else:
+            y = 'normal'
 
     if style not in ['simple', 'joint', 'column', 'scatter']:
         raise ValueError('style must be one of simple, joint, or colummn')
@@ -118,7 +129,11 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
 
     if isinstance(theoretical, str):
         if theoretical == 'normal':
-            theoretical = np.random.standard_normal(len(actual))
+            mean = np.mean(actual)
+            std  = np.std(actual)
+            theoretical = np.random.normal(
+                loc=mean, scale=std, size=len(actual)
+            )
         elif theoretical == 'uniform' or theoretical == 'random':
             theoretical = np.random.uniform(
                 np.min(actual), np.max(actual), len(actual)
@@ -127,6 +142,11 @@ def distcomp(y, x='uniform', bins=100, kind='qq', style=None,
             theoretical = np.random.random_sample(len(actual))
         else:
             raise ValueError('Invalid theoretical')
+
+    if kind == 'qq_log':
+        actual = -log10(actual)
+        theoretical = -log10(theoretical)
+        kind = 'qq'
 
     reg_pp = True  # If false, do a pp plot that is evenly spaced in the hist.
     if kind is 'lin_pp':
