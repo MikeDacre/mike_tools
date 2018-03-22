@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Send notification to email and push bullet.
@@ -9,12 +9,44 @@ import json
 import argparse
 from email.mime.text import MIMEText
 from subprocess import Popen, PIPE
-import requests
+
+# Doesn't work on python2
+if sys.version_info.major != 3:
+    sys.stderr.write("Doesn't work on python2\n")
+    sys.exit(1)
+
+try:
+    import requests
+    use_alternate_method = False
+except ImportError:
+    import urllib
+    import urllib.request
+    import urllib.parse
+    use_alternate_method = True
 
 HOST = os.environ.get('HOSTNAME')
 PUSH_API = "https://api.pushbullet.com/v2/pushes"
 PUSH_KEY = os.environ.get('PUSH_BULLET_KEY')
 SEND_ADDR = os.environ.get('EMAIL_ADDRESS')
+
+
+def send_post(data):
+    """Use urllib to send instead."""
+    # Build basic stuff
+    handler = urllib.request.HTTPHandler()
+    opener = urllib.request.build_opener(handler)
+    # Prepare the request
+    data = urllib.parse.urlencode(data).encode()
+    request = urllib.request.Request(PUSH_API, data=data)
+    request.add_header('Access-Token', 'o.WEgibcZVO5k7NPyfWZYm5Yi99ogzU1Sp')
+    request.add_header('Conent-Type', 'application/json')
+    request.get_method = lambda: "POST"
+    # Send it
+    try:
+        connection = opener.open(request)
+    except urllib.request.HTTPError as err:
+        connection = err
+    return connection.code
 
 
 def send_email(subject, message):
@@ -28,11 +60,17 @@ def send_email(subject, message):
 
 def notify_push_bullet(subject, message):
     """Send a Push Bullet Notification."""
-    headers = {'Content-Type':'application/json', 'Access-Token': PUSH_KEY}
+    headers = {'Content-Type': 'application/json', 'Access-Token': PUSH_KEY}
     data = {"title": subject, "body": message, "type": "note"}
-    r = requests.post(PUSH_API, headers=headers, data=json.dumps(data))
-    if not r.ok:
-        sys.stderr.write('Push Bullet Request Failed.\n{0}\n'.format(r))
+    if use_alternate_method:
+        code = send_post(data)
+    else:
+        r = requests.post(PUSH_API, headers=headers, data=json.dumps(data))
+        code = r.status_code
+    if not code == 200:
+        sys.stderr.write(
+            'Push Bullet request failed with code {0}\n'.format(code)
+        )
 
 
 def main(argv=None):
@@ -52,15 +90,18 @@ def main(argv=None):
         '-s', '--subject', default='Notification from {0}'.format(HOST),
         help="Subject of message"
     )
-    parser.add_argument('--push-key', help="Override PUSH_BULLET_KEY variable")
-    parser.add_argument('--email-addr', help="Override EMAIL_ADDRESS variable")
 
-    parser.add_argument(
+    method = parser.add_argument_group('methods')
+    method.add_argument(
         '--skip-push', action='store_true', help="Don't send push"
     )
-    parser.add_argument(
+    method.add_argument(
         '--send-email', action='store_true', help="Also send email"
     )
+
+    conf = parser.add_argument_group('config')
+    conf.add_argument('--push-key', help="Override PUSH_BULLET_KEY variable")
+    conf.add_argument('--email-addr', help="Override EMAIL_ADDRESS variable")
 
     args = parser.parse_args(argv)
 
