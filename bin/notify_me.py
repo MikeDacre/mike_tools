@@ -23,7 +23,6 @@ def send_email(subject, message):
     msg["To"] = SEND_ADDR
     msg["Subject"] = subject
     p = Popen(["sendmail", SEND_ADDR], stdin=PIPE)
-    print(msg.as_string())
     p.communicate(msg.as_string().encode())
 
 
@@ -46,7 +45,7 @@ def main(argv=None):
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Positional arguments
-    parser.add_argument('message', help="Message to send.")
+    parser.add_argument('message', nargs='?', help="Message to send.")
 
     # Optional flags
     parser.add_argument(
@@ -72,10 +71,18 @@ def main(argv=None):
         global PUSH_KEY
         PUSH_KEY = args.push_key
 
-    if not args.skip_push:
-        notify_push_bullet(args.subject, args.message)
-    if not args.skip_email:
-        send_email(args.subject, args.message)
+    message = args.message if args.message else sys.stdin.read()
+
+    sent = False
+    if not args.skip_push and PUSH_KEY:
+        notify_push_bullet(args.subject, message)
+        sent = True
+    if args.send_email and SEND_ADDR:
+        send_email(args.subject, message)
+        sent = True
+    if not sent:
+        sys.stderr.write('No destinations specified\n')
+        return 2
 
 
 if __name__ == '__main__' and '__file__' in globals():
