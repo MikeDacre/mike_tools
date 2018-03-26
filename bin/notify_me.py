@@ -7,6 +7,8 @@ import os
 import sys
 import json
 import argparse
+import bz2 as _bz2
+import gzip as _gzip
 from email.mime.text import MIMEText
 from subprocess import Popen, PIPE
 
@@ -73,6 +75,37 @@ def notify_push_bullet(subject, message):
         )
 
 
+def open_zipped(infile, mode='r'):
+    """return file handle of file regardless of compressed or not.
+
+    also returns already opened files unchanged, text mode automatic for
+    compatibility with python2.
+    """
+    # return already open files
+    if hasattr(infile, 'write'):
+        return infile
+    # make text mode automatic
+    if len(mode) == 1:
+        mode = mode + 't'
+    # refuse to handle non-strings that aren't files.
+    if not isinstance(infile, str):
+        raise ValueError("i cannot open a filename that isn't a string.")
+    # treat '-' appropriately
+    if infile == '-':
+        if 'w' in mode:
+            return sys.stdout
+        return sys.stdin
+    # if possible open zipped files
+    if infile.endswith('.gz'):
+        return _gzip.open(infile, mode)
+    if infile.endswith('.bz2'):
+        if hasattr(_bz2, 'open'):
+            return _bz2.open(infile, mode)
+        return _bz2.bz2file(infile, mode)
+    # fall back on regular open
+    return open(infile, mode)
+
+
 def main(argv=None):
     """Notify email and push bullet."""
     if not argv:
@@ -112,7 +145,22 @@ def main(argv=None):
         global PUSH_KEY
         PUSH_KEY = args.push_key
 
-    message = args.message if args.message else sys.stdin.read()
+    if args.message:
+        if isinstance(args.message, str):
+            if os.path.isfile(args.message):
+                message = open_zipped(args.message).read()
+            elif args.message == '-':
+                message = sys.stdin.read()
+            else:
+                message = args.message
+        else:
+            try:
+                message = open_zipped(args.message).read()
+            except:
+                message = args.message
+    else:
+        message = sys.stdin.read()
+    #  message = args.message if args.message else sys.stdin.read()
 
     sent = False
     if not args.skip_push and PUSH_KEY:
