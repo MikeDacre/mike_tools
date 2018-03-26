@@ -40,7 +40,7 @@ def send_post(data):
     # Prepare the request
     data = urllib.parse.urlencode(data).encode()
     request = urllib.request.Request(PUSH_API, data=data)
-    request.add_header('Access-Token', 'o.WEgibcZVO5k7NPyfWZYm5Yi99ogzU1Sp')
+    request.add_header('Access-Token', PUSH_KEY)
     request.add_header('Conent-Type', 'application/json')
     request.get_method = lambda: "POST"
     # Send it
