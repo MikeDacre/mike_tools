@@ -335,10 +335,10 @@ def distcomp(y, x=None, bins=100, kind='qq', style=None,
 
 
 def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
-            labels=None, fig=None, ax=None, density=True, log_scale=False,
-            legend='best', label_lim=10, shift_labels=False, highlight=None,
-            highlight_label=None, add_text=None, reg_details=True,
-            scale_factor=0.02, regression=True, size=10):
+            density=True, log_scale=False, regression=True, fill_reg=True,
+            reg_details=True, labels=None, label_lim=10, shift_labels=False,
+            highlight=None, highlight_label=None, legend='best', add_text=None,
+            scale_factor=0.02, size=10, lock_axes=True, fig=None, ax=None):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
@@ -356,37 +356,42 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         Y values
     df : DataFrame, optional
         If provided, x and y must be strings that are column names
-    xlabel : str, optional
-        A label for the x axis, defaults to x if df provided
-    ylabel : str, optional
-        A label for the y axis, defaults to y if df provided
+    {x,y}label : str, optional
+        A label for the axes, defaults column value if df provided
     title : str, optional
         Name of the plot
     pval : float, optional
         Draw a line at this point*point count
-    labels : Series, optional
-        Labels to show
     density : bool, optional
         Color points by density
     log_scale : str, optional
-        Plot in log scale, can also be 'negative' for
-                        negative log scale.
+        Plot in log scale, can also be 'negative' for negative log scale.
+    regression : bool, optional
+        Do a regression
+    fill_reg : bool, optional
+        Add confident lines to regression line
+    reg_details : bool, optional
+        Print regression summary
+    labels : Series, optional
+        Labels to show, must match indices of plotted data
+    label_lim : int, optional
+        Only show top # labels on each side of the line
+    shift_labels: bool, optional
+        If True, try to spread labels out. Imperfect.
+    highlight_label : Series, optional
+        Boolean series of same len as x/y
     legend : str, optional
         The location to place the legend
-    label_lim : int , optional
-        Only show top # labels on each side of the line
-    shift_labels:    If True, try to spread labels out. Imperfect.
-    highlight_label : Series
-        Boolean series of same len as x/y
-    reg_details : bool
-        Print regression summary
-    regression : bool
-        Do a regression
+    add_text : str, optional
+        Text to add to the legend
     scale_factor : float
         A ratio to expand the axes by.
     size : int or tuple
-    fig : pyplot figure, optional
-    ax : pyplot axes object, optional
+        Size of figure, defaults to square unless (x, y) length tuple given
+    lock_axes : bool, optional
+        Make X and Y axes the same length
+    fig/ax : matplotlib objects, optional
+        Use these instead
 
     Returns
     -------
@@ -394,7 +399,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     """
     f, a = _get_fig_ax(fig, ax, size=size)
     #  a.grid(False)
-    if df:
+    if isinstance(df, pd.DataFrame):
         assert isinstance(x, str)
         assert isinstance(y, str)
         if log_scale:
@@ -405,11 +410,21 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         if not xlabel:
             xlabel = y
         y = df[y]
+    elif df is not None:
+        raise ValueError('df must be a DataFrame or None')
+
+    # Get a color iterator
+    c = iter(sns.color_palette())
+    pc = next(c)
+    preg = sns.xkcd_rgb['light maroon']
 
     # Set up log scaling if necessary
     if log_scale:
         lx = np.log10(x)
         ly = np.log10(y)
+        # Replace infinate with 0
+        lx = np.nan_to_num(lx)
+        ly = np.nan_to_num(ly)
         mx = max(np.max(lx), np.max(ly))
         mn = min(np.min(lx), np.min(ly))
         if scale_factor:
@@ -419,6 +434,8 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         else:
             mxs = 10**mx
             mns = 10**mn
+        if mns == np.inf:
+            mns = 0
         mlim = (mns, mxs)
         # Do the regression
         if regression:
@@ -457,8 +474,11 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             res.params.tolist()[0], res.bse.tolist()[0],
             res.pvalues.tolist()[0], res.rsquared
         )
-        a.plot(x, reg_line, label=inf, alpha=0.8, zorder=10)
-        a.fill_between(x, 10**iv_u, 10**iv_l, alpha=0.05, interpolate=True, zorder=9)
+        a.plot(x, reg_line, label=inf, alpha=0.6, zorder=10, color=preg)
+        if fill_reg:
+            a.fill_between(
+                x, 10**iv_u, 10**iv_l, alpha=0.05, interpolate=True, zorder=9
+            )
 
     # Plot pval line
     if pval:
@@ -501,33 +521,39 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             # plotted last
             idx = z.argsort()
             x2, y2, z = x[idx], y[idx], z[idx]
-            s = a.scatter(x2, y2, c=z, s=50,
-                          cmap=sns.cubehelix_palette(8, as_cmap=True),
-                          edgecolor='', label=None, picker=True, zorder=2)
+            s = a.scatter(
+                x2, y2, c=z, s=50, cmap=sns.cubehelix_palette(8, as_cmap=True),
+                edgecolor='', label=None, picker=True, zorder=2
+            )
         except (ValueError, np.linalg.linalg.LinAlgError):
             # Too small for density
-            s = a.scatter(x, y,
-                          cmap=sns.cubehelix_palette(8, as_cmap=True),
-                          edgecolor='', label=None, picker=True, zorder=2)
+            s = a.scatter(
+                x, y, cmap=sns.cubehelix_palette(8, as_cmap=True),
+                edgecolor='', label=None, picker=True, zorder=2
+            )
     else:
         # Plot the points as blue dots
-        s = a.scatter(x, y,
-                      cmap=sns.cubehelix_palette(8, as_cmap=True),
-                      edgecolor='', label=None, picker=True, zorder=2)
+        s = a.scatter(
+            x, y, color=pc, edgecolor='', label=None,
+            picker=True, zorder=2
+        )
 
     if highlight is not None:
         highlight = pd.Series(highlight).tolist()
         x3 = pd.Series(x)[highlight]
         y3 = pd.Series(y)[highlight]
-        a.plot(x3, y3, 'o', c=sns.xkcd_rgb['leaf green'], alpha=0.4,
-               label='  ' + highlight_label)
+        a.plot(
+            x3, y3, 'o', color=next(c), alpha=0.4, label='  ' +
+            highlight_label
+        )
 
     if log_scale:
         a.loglog()
 
-    # Plot a 1-1 line in the background
-    print(mlim)
-    a.plot(mlim, mlim, '-', color='0.75', zorder=1000)
+    # Plot a 1-1 line in the background if axes locked
+    if lock_axes:
+        print(mlim)
+        a.plot(mlim, mlim, '-', color='0.75', zorder=1000)
 
     handles, labls = a.get_legend_handles_labels()
     rm = []
@@ -538,8 +564,9 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         handles.remove(rmthis)
 
     if add_text:
-        handles.append(mpatches.Patch(color='none',
-                                      label=add_text))
+        handles.append(
+            mpatches.Patch(color='none', label=add_text)
+        )
 
     a.legend(
         handles=handles,
@@ -553,15 +580,19 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         text = [a.text(*i) for i in set(text)]
         if shift_labels:
             if log_scale:
-                adjust_text(text, ax=a, text_from_points=True,
-                            expand_text=(0.1, .15), expand_align=(0.15, 0.8),
-                            expand_points=(0.1, 10.9),
-                            draggable=True,
-                            arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
+                adjust_text(
+                    text, ax=a, text_from_points=True, expand_text=(0.1, .15),
+                    expand_align=(0.15, 0.8), expand_points=(0.1, 10.9),
+                    draggable=True,
+                    arrowprops=dict(arrowstyle="->", color=next(c), lw=0.5)
+                )
             else:
-                adjust_text(text, ax=a, text_from_points=True,
-                            arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
-    else:
+                adjust_text(
+                    text, ax=a, text_from_points=True,
+                    arrowprops=dict(arrowstyle="->", color=next(c), lw=0.5)
+                )
+
+    if lock_axes:
         a.set_xlim(mlim)
         a.set_ylim(mlim)
 
