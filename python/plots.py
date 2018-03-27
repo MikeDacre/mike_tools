@@ -29,6 +29,179 @@ _warn.simplefilter(action='ignore', category=FutureWarning)
 _warn.simplefilter(action='ignore', category=UserWarning)
 _warn.simplefilter(action='ignore', category=RuntimeWarning)
 
+
+###############################################################################
+#                                 Regression                                  #
+###############################################################################
+
+
+class LinearRegression(object):
+
+    """
+    Use statsmodels, scipy, and numpy to do a linear regression.
+
+    Regression includes confidence intervals and prediction intervals.
+
+    Attributes
+    ----------
+    {x,y}
+        Original x, y data.
+    X : pandas.core.frame.DataFrame
+        Original X with a column of ones added as a constant (unless x already
+        had a constant column).
+    x_pred : numpy.ndarray
+        Predicted evently spaced data. From
+        ``numpy.linspace(x.min(), x.max(), len(x))``
+    x_pred_c : numpy.ndarry
+        Original x_pred with a column of ones added as a constant
+    y_pred :numpy.ndarray
+        Predicted y values from the model
+    model : statsmodels.regression.linear_model.OLS
+    fitted : statsmodels.regression.linear_model.RegressionResultsWrapper
+        Result of model.fit()
+    summary : statsmodels.iolib.summary.Summary
+        Summary data for regression
+    reg_line : numpy.ndarray
+        Statsmodels fitted values as an ndarray for plotting
+    p : float
+        P value for regression in x
+    rsquared : float
+        The r-squared for the regression
+    conf : numpy.ndarray
+        Confidence interval array for x values.
+    ci_{upper,lower} : numpy.ndarray
+        Upper and lower confidence interval arrays. 95% chance real regression
+        line in this interval
+    ci_t : float
+        T statistic used for the confidence interval. 95% chance real y value
+        is in this interval
+    pred_{upper,lower} : numpy.ndarray
+        Upper and lower prediction
+    {y_hat,y_err,s_err,sdev} : numpy.ndarray
+    """
+
+    def __init__(self, x, y):
+        """
+        Do the regression.
+
+        Params
+        ------
+        {x,y} : numpy.ndarray or pandas.core.series.Series
+            X and Y data
+        log : bool
+            Do the regression in log10 space instead
+        """
+        self.x = x
+        self.y = y
+        self.n = len(x)
+        self.X = sm.add_constant(x)
+
+        # Do regression
+        self.model = sm.OLS(self.y, self.X)
+        self.fitted = self.model.fit()
+        self.reg_line = self.fitted.fittedvalues
+        self.reg_summary = self.fitted.summary()
+
+        # Get predicted data
+        self.x_pred = np.linspace(x.min(), x.max(), self.n)
+        self.x_pred_c = sm.add_constant(self.x_pred)
+        self.y_pred = self.fitted.predict(self.x_pred_c)
+
+        # Calculate confidence intervals
+        self.y_hat = self.fitted.predict(self.X)
+        self.y_err = y - self.y_hat
+        mean_x = self.x.T[1].mean()
+        dof = self.n - self.fitted.df_model - 1
+
+        self.ci_t = sts.t.ppf(1-0.025, df=dof)
+        self.s_err = np.sum(np.power(self.y_err, 2))
+
+        self.conf = (
+            self.ci_t * np.sqrt(
+                (
+                    self.s_err/(self.n-2)
+                )*(
+                    1.0/self.n + (
+                        np.power(
+                            (self.x_pred-mean_x), 2
+                        )/(
+                            (np.sum(np.power(self.x_pred,2))) - self.n*(np.power(mean_x,2))
+                        )
+                    )
+                )
+            )
+        )
+        self.ci_upper = self.y_pred + abs(self.conf)
+        self.ci_lower = self.y_pred - abs(self.conf)
+
+        # Get prediction intervals
+        self.sdev, self.pred_lower, self.pred_upper = wls_prediction_std(
+            self.fitted, exog=self.x_pred_c, alpha=0.05
+        )
+
+        # Assign stats
+        self.rsquared = self.fitted.rsquared
+        self.P = self.fitted.pvalues.tolist()[0]
+
+    def plot_reg_line(self, ax, alpha=0.6, zorder=10, color=None,
+                      include_label=True, unlog=False):
+        """Plot the regression line."""
+        color = color if color else 'darkorchid'
+        x_pred = 10**self.x_pred if unlog else self.x_pred
+        y_pred = 10**self.y_pred if unlog else self.y_pred
+        label = self.legend_text() if include_label else None
+        ax.plot(
+            x_pred, y_pred, '-', color=color, linewidth=2,
+            label=label, alpha=alpha, zorder=zorder
+        )
+
+    def plot_ci_line(self, ax, alpha=0.2, zorder=10, color=None, unlog=False):
+        """Plot the confidence interval lines."""
+        color = color if color else sns.xkcd_rgb['rust']
+        x_pred = 10**self.x_pred if unlog else self.x_pred
+        ci_upper = 10**self.ci_upper if unlog else self.ci_upper
+        ci_lower = 10**self.ci_lower if unlog else self.ci_lower
+        ax.fill_between(
+            x_pred, ci_lower, ci_upper, color=color,
+            alpha=alpha, zorder=zorder
+        )
+
+    def plot_pred_line(self, ax, alpha=0.1, zorder=-5, color=None, unlog=False):
+        """Plot the confidence interval lines."""
+        color = color if color else sns.xkcd_rgb['light green']
+        x_pred = 10**self.x_pred if unlog else self.x_pred
+        pred_upper = 10**self.pred_upper if unlog else self.pred_upper
+        pred_lower = 10**self.pred_lower if unlog else self.pred_lower
+        ax.fill_between(
+            x_pred, pred_lower, pred_upper, color=color,
+            interpolate=True, alpha=alpha, zorder=zorder
+        )
+
+    def print_reg_summary(self):
+        """Print the regression summary."""
+        print(self.fitted.summary())
+
+    def legend_text(self):
+        """Print summary stats."""
+        return 'OLS: {:.3} +/- {:.2}\n    P: {:.2e}\n  $R^2$: {:.2}'.format(
+            self.fitted.params.tolist()[0], self.fitted.bse.tolist()[0],
+            self.P, self.rsquared
+        )
+
+    def __str__(self):
+        """Return summary stats."""
+        return 'OLS: {:.3} +/- {:.2}\nP: {:.2e}\nR-squared: {:.2}'.format(
+            self.fitted.params.tolist()[0], self.fitted.bse.tolist()[0],
+            self.P, self.rsquared
+        )
+
+    def __repr__(self):
+        """Print repr for statsmodels."""
+        return 'LinearRegression({0}, R2: {1:.2e}, P: {2:.2e})'.format(
+            repr(self.model), self.rsquared, self.P
+        )
+
+
 ###############################################################################
 #                             Basic Scatter Plots                             #
 ###############################################################################
@@ -348,6 +521,10 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
 
     Density defaults to true, it can be fairly slow if there are many points.
 
+    Regression is done using the statsmodels OLS regression with a constant
+    added to the X values using sm.add_constant() to add a column of ones to
+    the array of x values. If a constant is already present none is added.
+
     Parameters
     ----------
     x : Series or str if df provided
@@ -369,7 +546,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     regression : bool, optional
         Do a regression
     fill_reg : bool, optional
-        Add confident lines to regression line
+        Add confidence lines to regression line
     reg_details : bool, optional
         Print regression summary
     labels : Series, optional
@@ -395,7 +572,11 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
 
     Returns
     -------
-    (fig, ax): A pyplot figure and axis object in a tuple
+    fig : plt.figure
+    ax : plt.axes
+    reg : plots.LinearRegression or None
+        Statsmodel OLS regression results wrapped in a LinearRegression
+        object. If no regression requested, returns None
     """
     f, a = _get_fig_ax(fig, ax, size=size)
     #  a.grid(False)
@@ -407,8 +588,8 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         if not xlabel:
             xlabel = x
         x = df[x]
-        if not xlabel:
-            xlabel = y
+        if not ylabel:
+            ylabel = y
         y = df[y]
     elif df is not None:
         raise ValueError('df must be a DataFrame or None')
@@ -439,14 +620,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         mlim = (mns, mxs)
         # Do the regression
         if regression:
-            model = sm.OLS(ly, lx)
-            res = model.fit()
-            if reg_details:
-                print(res.summary())
-            _, iv_l, iv_u = wls_prediction_std(res)
-            reg_line = 10**res.fittedvalues
-            reg_line_upper = 10**iv_u
-            reg_line_lower = 10**iv_l
+            reg = LinearRegression(lx, ly)
     # No log
     else:
         mx = max(np.max(x), np.max(y))
@@ -458,27 +632,18 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             mlim = (mn, mx)
         # Do the regression
         if regression:
-            model = sm.OLS(y, x)
-            res = model.fit()
-            P = res.pvalues.tolist()[0]
-            if reg_details:
-                print(res.summary())
-            _, iv_l, iv_u = wls_prediction_std(res)
-            reg_line = res.fittedvalues
-            reg_line_upper = iv_u
-            reg_line_lower = iv_l
+            reg = LinearRegression(x, y)
 
     # Plot the regression on top
     if regression:
-        inf = 'OLS: {:.3} +/- {:.2}\n    P: {:.2e}\n  $R^2$: {:.2}'.format(
-            res.params.tolist()[0], res.bse.tolist()[0],
-            res.pvalues.tolist()[0], res.rsquared
-        )
-        a.plot(x, reg_line, label=inf, alpha=0.6, zorder=10, color=preg)
+        if reg_details:
+            reg.print_reg_summary()
+        reg.plot_reg_line(ax=a, color=preg, unlog=log_scale)
         if fill_reg:
-            a.fill_between(
-                x, 10**iv_u, 10**iv_l, alpha=0.05, interpolate=True, zorder=9
-            )
+            reg.plot_ci_line(ax=a, unlog=log_scale)
+            reg.plot_pred_line(ax=a, unlog=log_scale)
+    else:
+        reg = None
 
     # Plot pval line
     if pval:
@@ -610,7 +775,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
 
     plt.xticks(rotation=0)
 
-    return f, a
+    return f, a, reg
 
 
 def get_labels(labels, x, y, lim, log_scale):
@@ -963,6 +1128,8 @@ def _get_fig_ax(fig, ax, size=9):
             raise Exception('You must provide both fig and ax, not just one.')
         return fig, ax
     else:
+        import seaborn as sns
+        sns.set_style('darkgrid')
         if isinstance(size, int):
             size = (size, size)
         return plt.subplots(figsize=size)
