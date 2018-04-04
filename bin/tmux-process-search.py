@@ -13,8 +13,8 @@ import psutil
 
 from six.moves import input
 
-TMUX_LIST_CMD = 'tmux list-panes -a -F "#{{pane_pid}} #{{session_name}}" | grep {0}'
-PROC_SEARCH_CMD = 'ps -u $USER -o "pid,command" | grep {0} | grep -v grep'
+TMUX_LIST_CMD = 'tmux {targs} list-panes -a -F "#{{pane_pid}} #{{session_name}}" | grep {pid}'
+PROC_SEARCH_CMD = 'ps -u $USER -o "pid,command" | grep {{0}} | grep -v grep | grep -v {0}'.format(__file__)
 
 
 def search_pid(process_name_fragment):
@@ -45,7 +45,7 @@ def search_pid(process_name_fragment):
     return int(proc.strip().split(' ')[0])
 
 
-def find_session(pid):
+def find_session(pid, tmux_args=None):
     """Return the tmux session for a given pid."""
     proc = psutil.Process(pid)
     procs = []
@@ -67,8 +67,9 @@ def find_session(pid):
 
     ppid = session_child.pid
 
+    tmux_args = "" if tmux_args is None else tmux_args
     code, out, err = run(
-		TMUX_LIST_CMD.format(ppid), shell=True
+		TMUX_LIST_CMD.format(targs=tmux_args, pid=ppid), shell=True
 	)
 
     if code != 0:
@@ -145,16 +146,17 @@ def main(argv=None):
         formatter_class=_argparse.RawDescriptionHelpFormatter
     )
 
+    parser.add_argument('--tmux-args', help="Additional args to pass to tmux")
     parser.add_argument('proc', help='PID or name to search for')
 
     args = parser.parse_args(argv)
 
     if args.proc.isdigit():
-        session_name = find_session(int(args.proc))
+        session_name = find_session(int(args.proc), args.tmux_args)
     else:
         pid = search_pid(args.proc)
         if pid:
-            session_name = find_session(pid)
+            session_name = find_session(pid, args.tmux_args)
         else:
             _sys.stderr.write('Could not find pid for name.\n')
             return 2
