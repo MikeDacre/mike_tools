@@ -11,7 +11,38 @@ import shlex as sh
 
 import psutil
 
-TMUX_LIST_CMD = 'tmux list-panes -a -F "#{pane_pid} #{session_name}" | grep {0}'
+from six.moves import input
+
+TMUX_LIST_CMD = 'tmux list-panes -a -F "#{{pane_pid}} #{{session_name}}" | grep {0}'
+PROC_SEARCH_CMD = 'ps -u $USER -o "pid,command" | grep {0} | grep -v grep'
+
+
+def search_pid(process_name_fragment):
+    """Linux specific process grepping. Returns PID."""
+    code, out, err = run(
+        PROC_SEARCH_CMD.format(process_name_fragment), shell=True
+    )
+    if code != 0:
+        _sys.stderr.write('Failed to find command\n')
+        return None
+    procs = out.strip().split('\n')
+    if len(procs) == 1:
+        proc = procs[0]
+    else:
+        _sys.stderr.write(
+            'More than one option, please chose from the following:\n' +
+            '\n'.join(['{0}: {1}'.format(i, n) for i, n in enumerate(procs)]) +
+            '\nWhich one do you want to search?\n'
+        )
+        mx = len(procs)-1
+        choice = input('Choice, 0-{0}: '.format(mx)).strip()
+        if not choice.isdigit():
+            raise ValueError('Choice must be a number\n')
+        p = int(choice)
+        if p < 0 or p > mx:
+            raise ValueError('Choice must be between 0 and {0}'.format(mx))
+        proc = procs[p]
+    return int(proc.strip().split(' ')[0])
 
 
 def find_session(pid):
@@ -34,17 +65,19 @@ def find_session(pid):
             )
             return None
 
+    ppid = session_child.pid
+
     code, out, err = run(
-		TMUX_LIST_CMD.format(session_child.pid), shell=True
+		TMUX_LIST_CMD.format(ppid), shell=True
 	)
 
     if code != 0:
         _sys.stderr.write(
-            'Failed to find tmux session of process\n'
+            'Failed to find tmux session of parent process {0}\n'.format(ppid) +
+            'Error message:\n{0}\n'.format(err)
         )
         return None
     return out.split(' ')[-1]
-
 
 
 def run(cmd, shell=False, check=False, get='all'):
@@ -112,11 +145,25 @@ def main(argv=None):
         formatter_class=_argparse.RawDescriptionHelpFormatter
     )
 
-    parser.add_argument('pid', type=int, help='PID to search for')
+    parser.add_argument('proc', help='PID or name to search for')
 
     args = parser.parse_args(argv)
 
-    session_name = find_session(pid)
+    if args.proc.isdigit():
+        session_name = find_session(int(args.proc))
+    else:
+        pid = search_pid(args.proc)
+        if pid:
+            session_name = find_session(pid)
+        else:
+            _sys.stderr.write('Could not find pid for name.\n')
+            return 2
+
+    if session_name is None:
+        _sys.stderr.write('Failed to find session.\n')
+        return 1
+
+    _sys.stdout.write(session_name + '\n')
 
 
 if __name__ == '__main__' and '__file__' in globals():
