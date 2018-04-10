@@ -170,7 +170,7 @@ class LinearRegression(object):
             alpha=alpha, zorder=zorder
         )
 
-    def plot_pred_line(self, ax, alpha=0.2, zorder=5, color=None, unlog=False):
+    def plot_pred_line(self, ax, alpha=0.1, zorder=5, color=None, unlog=False):
         """Plot the confidence interval lines."""
         color = color if color else sns.xkcd_rgb['light green']
         x_pred = 10**self.x_pred if unlog else self.x_pred
@@ -211,8 +211,8 @@ class LinearRegression(object):
 ###############################################################################
 
 
-def distcomp(y, x=None, bins=100, kind='qq', style=None,
-             ylabel=None, xlabel=None, title=None, size=10):
+def distcomp(y, x=None, bins=500, kind='qq', style=None, ylabel=None,
+             xlabel=None, title=None, fig=None, ax=None, size=10):
     """Compare two vectors of different length by creating equal bins.
 
     If kind is qq, the plot is a simple Quantile-Quantile plot, if it is pp,
@@ -288,11 +288,11 @@ def distcomp(y, x=None, bins=100, kind='qq', style=None,
         else:
             style = 'joint'
 
-    if not y:
+    if x is None:
         if kind is 'qq_log':
-            y = 'pvalue'
+            x = 'pvalue'
         else:
-            y = 'normal'
+            x = 'normal'
 
     if style not in ['simple', 'joint', 'column', 'scatter']:
         raise ValueError('style must be one of simple, joint, or colummn')
@@ -321,8 +321,8 @@ def distcomp(y, x=None, bins=100, kind='qq', style=None,
             raise ValueError('Invalid theoretical')
 
     if kind == 'qq_log':
-        actual = -log10(actual)
-        theoretical = -log10(theoretical)
+        actual = -np.log10(actual)
+        theoretical = -np.log10(theoretical)
         kind = 'qq'
 
     reg_pp = True  # If false, do a pp plot that is evenly spaced in the hist.
@@ -378,11 +378,24 @@ def distcomp(y, x=None, bins=100, kind='qq', style=None,
                 ttl += val
                 ser.loc[idx] = ttl
 
-    xlabel = xlabel if xlabel else 'Theoretical'
-    ylabel = ylabel if ylabel else 'Actual'
+    # Set labels
+    if not xlabel:
+        if hasattr(x, 'name'):
+            xlabel = x.name
+        else:
+            xlabel = 'Theoretical'
+    if not ylabel:
+        if hasattr(y, 'name'):
+            ylabel = y.name
+        else:
+            ylabel = 'Actual'
 
     # Create figure layout
-    if style == 'simple':
+    if fig or ax:
+        fig, ax == _get_fig_ax(fig, ax)
+        style = 'simple'
+
+    elif style == 'simple':
         fig, ax = plt.subplots(figsize=(size,size))
 
     elif style == 'joint':
@@ -474,10 +487,13 @@ def distcomp(y, x=None, bins=100, kind='qq', style=None,
     fig.tight_layout()
 
     if title:
-        fig.suptitle(title, fontsize=16)
-        if kind == 'joint':
-            fig.subplots_adjust(top=0.95)
+        if style == 'simple':
+            ax.set_title(title, fontsize=14)
         else:
+            fig.suptitle(title, fontsize=16)
+        if style == 'joint':
+            fig.subplots_adjust(top=0.95)
+        elif style != 'simple':
             fig.subplots_adjust(top=0.93)
 
     # Last thing is to set the xtick labels for cummulative plots
@@ -509,234 +525,6 @@ def distcomp(y, x=None, bins=100, kind='qq', style=None,
         ax = (ax, ax2, ax3)
 
     return fig, ax
-
-
-def fast_kde(x, y, gridsize=(400, 400), extents=None, weights=None,
-             sample=False):
-    """
-    Performs a gaussian kernel density estimate over a regular grid.
-
-    Uses a convolution of the gaussian kernel with a 2D histogram of the data.
-    This function is typically several orders of magnitude faster than
-    scipy.stats.kde.gaussian_kde for large (>1e7) numbers of points and
-    produces an essentially identical result.
-
-    Written by Joe Kington, available here:
-        https://gist.github.com/joferkington/d95101a61a02e0ba63e5
-
-    Params
-    ------
-    x: array-like
-        The x-coords of the input data points
-    y: array-like
-        The y-coords of the input data points
-    gridsize: tuple, optional
-        An (nx,ny) tuple of the size of the output
-        grid. Defaults to (400, 400).
-    extents: tuple, optional
-        A (xmin, xmax, ymin, ymax) tuple of the extents of output grid.
-        Defaults to min/max of x & y input.
-    weights: array-like or None, optional
-        An array of the same shape as x & y that weighs each sample (x_i,
-        y_i) by each value in weights (w_i).  Defaults to an array of ones
-        the same size as x & y.
-    sample: boolean
-        Whether or not to return the estimated density at each location.
-        Defaults to False
-
-    Returns
-    -------
-    density : 2D array of shape *gridsize*
-        The estimated probability distribution function on a regular grid
-    extents : tuple
-        xmin, xmax, ymin, ymax
-    sampled_density : 1D array of len(*x*)
-        Only returned if *sample* is True.  The estimated density at each
-        point.
-    """
-    #---- Setup --------------------------------------------------------------
-    x, y = np.atleast_1d([x, y])
-    x, y = x.reshape(-1), y.reshape(-1)
-
-    if x.size != y.size:
-        raise ValueError('Input x & y arrays must be the same size!')
-
-    nx, ny = gridsize
-    n = x.size
-
-    if weights is None:
-        # Default: Weight all points equally
-        weights = np.ones(n)
-    else:
-        weights = np.squeeze(np.asarray(weights))
-        if weights.size != x.size:
-            raise ValueError('Input weights must be an array of the same size'
-                    ' as input x & y arrays!')
-
-    # Default extents are the extent of the data
-    if extents is None:
-        xmin, xmax = x.min(), x.max()
-        ymin, ymax = y.min(), y.max()
-    else:
-        xmin, xmax, ymin, ymax = map(float, extents)
-    extents = xmin, xmax, ymin, ymax
-    dx = (xmax - xmin) / (nx - 1)
-    dy = (ymax - ymin) / (ny - 1)
-
-    #---- Preliminary Calculations -------------------------------------------
-
-    # Most of this is a hack to re-implment np.histogram2d using `coo_matrix`
-    # for better memory/speed performance with huge numbers of points.
-
-    # First convert x & y over to pixel coordinates
-    # (Avoiding np.digitize due to excessive memory usage!)
-    ij = np.column_stack((y, x))
-    ij -= [ymin, xmin]
-    ij /= [dy, dx]
-    ij = np.floor(ij, ij).T
-
-    # Next, make a 2D histogram of x & y
-    # Avoiding np.histogram2d due to excessive memory usage with many points
-    grid = sp.sparse.coo_matrix((weights, ij), shape=(ny, nx)).toarray()
-
-    # Calculate the covariance matrix (in pixel coords)
-    cov = _image_cov(grid)
-
-    # Scaling factor for bandwidth
-    scotts_factor = np.power(n, -1.0 / 6) # For 2D
-
-    #---- Make the gaussian kernel -------------------------------------------
-
-    # First, determine how big the kernel needs to be
-    std_devs = np.diag(np.sqrt(cov))
-    kern_nx, kern_ny = np.round(scotts_factor * 2 * np.pi * std_devs)
-    kern_nx, kern_ny = int(kern_nx), int(kern_ny)
-
-    # Determine the bandwidth to use for the gaussian kernel
-    inv_cov = np.linalg.inv(cov * scotts_factor**2)
-
-    # x & y (pixel) coords of the kernel grid, with <x,y> = <0,0> in center
-    xx = np.arange(kern_nx, dtype=np.float) - kern_nx / 2.0
-    yy = np.arange(kern_ny, dtype=np.float) - kern_ny / 2.0
-    xx, yy = np.meshgrid(xx, yy)
-
-    # Then evaluate the gaussian function on the kernel grid
-    kernel = np.vstack((xx.flatten(), yy.flatten()))
-    kernel = np.dot(inv_cov, kernel) * kernel
-    kernel = np.sum(kernel, axis=0) / 2.0
-    kernel = np.exp(-kernel)
-    kernel = kernel.reshape((kern_ny, kern_nx))
-
-    #---- Produce the kernel density estimate --------------------------------
-
-    # Convolve the gaussian kernel with the 2D histogram, producing a gaussian
-    # kernel density estimate on a regular grid
-
-    # Big kernel, use fft...
-    if kern_nx * kern_ny > np.product(gridsize) / 4.0:
-        grid = sp.signal.fftconvolve(grid, kernel, mode='same')
-    # Small kernel, use ndimage
-    else:
-        grid = sp.ndimage.convolve(grid, kernel, mode='constant', cval=0)
-
-    # Normalization factor to divide result by so that units are in the same
-    # units as scipy.stats.kde.gaussian_kde's output.
-    norm_factor = 2 * np.pi * cov * scotts_factor**2
-    norm_factor = np.linalg.det(norm_factor)
-    norm_factor = n * dx * dy * np.sqrt(norm_factor)
-
-    # Normalize the result
-    grid /= norm_factor
-
-    if sample:
-        i, j = ij.astype(int)
-        return grid, extents, grid[i, j]
-    else:
-        return grid, extents
-
-
-def _image_cov(data):
-    """Efficiently calculate the cov matrix of an image."""
-    def raw_moment(data, ix, iy, iord, jord):
-        data = data * ix**iord * iy**jord
-        return data.sum()
-
-    ni, nj = data.shape
-    iy, ix = np.mgrid[:ni, :nj]
-    data_sum = data.sum()
-
-    m10 = raw_moment(data, ix, iy, 1, 0)
-    m01 = raw_moment(data, ix, iy, 0, 1)
-    x_bar = m10 / data_sum
-    y_bar = m01 / data_sum
-
-    u11 = (raw_moment(data, ix, iy, 1, 1) - x_bar * m01) / data_sum
-    u20 = (raw_moment(data, ix, iy, 2, 0) - x_bar * m10) / data_sum
-    u02 = (raw_moment(data, ix, iy, 0, 2) - y_bar * m01) / data_sum
-
-    cov = np.array([[u20, u11], [u11, u02]])
-    return cov
-
-
-def _shift_cmap(cmap, start=0, midpoint=0.5, stop=1.0):
-    """Function to offset the "center" of a colormap.
-
-    Useful for data with a negative min and positive max and you want the
-    middle of the colormap's dynamic range to be at zero
-
-    From: https://stackoverflow.com/questions/7404116
-
-    Params
-    ------
-    cmap : matplotlib.cm type cmap
-        The cmap to be altered
-    start : float, optional
-        Offset from lowest point in the colormap's range.
-        Defaults to 0.0 (no lower ofset). Should be between
-        0.0 and `midpoint`.
-    midpoint : float, optional
-        The new center of the colormap. Defaults to 0.5 (no shift). Should be
-        between 0.0 and 1.0. In general, this should be  1 - vmax/(vmax +
-        abs(vmin)) For example if your data range from -15.0 to +5.0 and you
-        want the center of the colormap at 0.0, `midpoint` should be set to  1
-        - 5/(5 + 15)) or 0.75
-    stop : float, optional
-        Offset from highets point in the colormap's range.  Defaults to 1.0 (no
-        upper ofset). Should be between `midpoint` and 1.0.
-
-    Returns
-    -------
-    new_cmap : matplotlib.cm type cmap
-        Altered cmap
-    """
-    cdict = {
-        'red': [],
-        'green': [],
-        'blue': [],
-        'alpha': []
-    }
-
-    # regular index to compute the colors
-    reg_index = np.linspace(start, stop, 257)
-
-    # shifted index to match the data
-    shift_index = np.hstack([
-        np.linspace(0.0, midpoint, 128, endpoint=False),
-        np.linspace(midpoint, 1.0, 129, endpoint=True)
-    ])
-
-    for ri, si in zip(reg_index, shift_index):
-        r, g, b, a = cmap(ri)
-        cdict['red'].append((si, r, r))
-        cdict['green'].append((si, g, g))
-        cdict['blue'].append((si, b, b))
-        cdict['alpha'].append((si, a, a))
-
-    name = cmap.name + '_shifted'
-
-    new_cmap = colors.LinearSegmentedColormap(name, cdict)
-
-    return new_cmap
 
 
 def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
@@ -992,7 +780,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
 
     # Plot a 1-1 line in the background
     one_line = (max(xlim[0], ylim[0]), min(xlim[1], ylim[1]))
-    a.plot(one_line, one_line, '-', color='0.85', zorder=1000)
+    a.plot(one_line, one_line, '-', color='0.9', zorder=4)
 
     # Apply log prior to adding text and labels
     if log_scale:
@@ -1063,15 +851,15 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
 
 
 def compare_overlapping_dfs(df1, df2, labels, col=None, orient='vertical'):
-    """Make venn diagram and scatter plot from two Series.
+    """Make venn diagram, QQ plot, and scatter plot from two DataFrames.
 
     Params
     ------
-    df{1/2} : DataFrames with identical indices
+    df{1/2} : DataFrames with identical(ish) indices
     labels : (str, str)
         Labels for the two dfs
     col : str, optional
-        Optional column to compare, will plot a scatter plot alongside the
+        Optional column to compare, will plot a qq plot alongside the
         venn diagram
     orient : {vertical, horizontal}, optional
         Stack graphs or place next to each other, if plotting two plots
@@ -1082,12 +870,9 @@ def compare_overlapping_dfs(df1, df2, labels, col=None, orient='vertical'):
         Combined dataframe
     fig : plt.figure
     ax : plt.axes
-    reg : plots.LinearRegression or None
-        Statsmodel OLS regression results wrapped in a LinearRegression
-        object. None if col is not provided.
     """
-    sns.set_style('white')
     if col is None:
+        sns.set_style('white')
         fig, ax = plt.subplots(figsize=(12,12))
         venn_ax = ax
     else:
@@ -1097,7 +882,7 @@ def compare_overlapping_dfs(df1, df2, labels, col=None, orient='vertical'):
             )
         elif orient == 'horizontal' or orient == 'h':
             fig, ax = plt.subplots(
-                1, 2, figsize=(20, 10), sharex=False, sharey=False
+                1, 2, figsize=(12, 6), sharex=False, sharey=False
             )
         else:
             raise ValueError("orient must be one of {'vertical', 'horizontal'}")
@@ -1115,12 +900,17 @@ def compare_overlapping_dfs(df1, df2, labels, col=None, orient='vertical'):
 
     # Do a scatter plot if requested
     if col is not None:
-        lab = ['{0}_{1}'.format(col, i) for i in labels]
-        fig, sax, reg = scatter(x=lab[0], y=lab[1], df=df, fig=fig, ax=sax)
-    else:
-        reg = None
+        ylabel, xlabel = ['{0}_{1}'.format(col, i) for i in labels]
+        fig, sax = distcomp(
+            df2[col], df1[col], bins=1000, kind='qq', style='simple',
+            fig=fig, ax=sax, xlabel=xlabel, ylabel=ylabel,
+        )
+        sns.despine(fig, sax)
+        venn_ax.set_title('Venn')
+        fig.suptitle('Compare {0} to {1}'.format(*labels), fontsize=20)
+        fig.subplots_adjust(top=0.80)
 
-    return df, fig, ax, reg
+    return df, fig, ax, venn
 
 
 ###############################################################################
@@ -1371,6 +1161,234 @@ def manhattan(chrdict, title=None, xlabel='genome', ylabel='values',
 ###############################################################################
 #                              Private Functions                              #
 ###############################################################################
+
+def fast_kde(x, y, gridsize=(400, 400), extents=None, weights=None,
+             sample=False):
+    """
+    Performs a gaussian kernel density estimate over a regular grid.
+
+    Uses a convolution of the gaussian kernel with a 2D histogram of the data.
+    This function is typically several orders of magnitude faster than
+    scipy.stats.kde.gaussian_kde for large (>1e7) numbers of points and
+    produces an essentially identical result.
+
+    Written by Joe Kington, available here:
+        https://gist.github.com/joferkington/d95101a61a02e0ba63e5
+
+    Params
+    ------
+    x: array-like
+        The x-coords of the input data points
+    y: array-like
+        The y-coords of the input data points
+    gridsize: tuple, optional
+        An (nx,ny) tuple of the size of the output
+        grid. Defaults to (400, 400).
+    extents: tuple, optional
+        A (xmin, xmax, ymin, ymax) tuple of the extents of output grid.
+        Defaults to min/max of x & y input.
+    weights: array-like or None, optional
+        An array of the same shape as x & y that weighs each sample (x_i,
+        y_i) by each value in weights (w_i).  Defaults to an array of ones
+        the same size as x & y.
+    sample: boolean
+        Whether or not to return the estimated density at each location.
+        Defaults to False
+
+    Returns
+    -------
+    density : 2D array of shape *gridsize*
+        The estimated probability distribution function on a regular grid
+    extents : tuple
+        xmin, xmax, ymin, ymax
+    sampled_density : 1D array of len(*x*)
+        Only returned if *sample* is True.  The estimated density at each
+        point.
+    """
+    #---- Setup --------------------------------------------------------------
+    x, y = np.atleast_1d([x, y])
+    x, y = x.reshape(-1), y.reshape(-1)
+
+    if x.size != y.size:
+        raise ValueError('Input x & y arrays must be the same size!')
+
+    nx, ny = gridsize
+    n = x.size
+
+    if weights is None:
+        # Default: Weight all points equally
+        weights = np.ones(n)
+    else:
+        weights = np.squeeze(np.asarray(weights))
+        if weights.size != x.size:
+            raise ValueError('Input weights must be an array of the same size'
+                    ' as input x & y arrays!')
+
+    # Default extents are the extent of the data
+    if extents is None:
+        xmin, xmax = x.min(), x.max()
+        ymin, ymax = y.min(), y.max()
+    else:
+        xmin, xmax, ymin, ymax = map(float, extents)
+    extents = xmin, xmax, ymin, ymax
+    dx = (xmax - xmin) / (nx - 1)
+    dy = (ymax - ymin) / (ny - 1)
+
+    #---- Preliminary Calculations -------------------------------------------
+
+    # Most of this is a hack to re-implment np.histogram2d using `coo_matrix`
+    # for better memory/speed performance with huge numbers of points.
+
+    # First convert x & y over to pixel coordinates
+    # (Avoiding np.digitize due to excessive memory usage!)
+    ij = np.column_stack((y, x))
+    ij -= [ymin, xmin]
+    ij /= [dy, dx]
+    ij = np.floor(ij, ij).T
+
+    # Next, make a 2D histogram of x & y
+    # Avoiding np.histogram2d due to excessive memory usage with many points
+    grid = sp.sparse.coo_matrix((weights, ij), shape=(ny, nx)).toarray()
+
+    # Calculate the covariance matrix (in pixel coords)
+    cov = _image_cov(grid)
+
+    # Scaling factor for bandwidth
+    scotts_factor = np.power(n, -1.0 / 6) # For 2D
+
+    #---- Make the gaussian kernel -------------------------------------------
+
+    # First, determine how big the kernel needs to be
+    std_devs = np.diag(np.sqrt(cov))
+    kern_nx, kern_ny = np.round(scotts_factor * 2 * np.pi * std_devs)
+    kern_nx, kern_ny = int(kern_nx), int(kern_ny)
+
+    # Determine the bandwidth to use for the gaussian kernel
+    inv_cov = np.linalg.inv(cov * scotts_factor**2)
+
+    # x & y (pixel) coords of the kernel grid, with <x,y> = <0,0> in center
+    xx = np.arange(kern_nx, dtype=np.float) - kern_nx / 2.0
+    yy = np.arange(kern_ny, dtype=np.float) - kern_ny / 2.0
+    xx, yy = np.meshgrid(xx, yy)
+
+    # Then evaluate the gaussian function on the kernel grid
+    kernel = np.vstack((xx.flatten(), yy.flatten()))
+    kernel = np.dot(inv_cov, kernel) * kernel
+    kernel = np.sum(kernel, axis=0) / 2.0
+    kernel = np.exp(-kernel)
+    kernel = kernel.reshape((kern_ny, kern_nx))
+
+    #---- Produce the kernel density estimate --------------------------------
+
+    # Convolve the gaussian kernel with the 2D histogram, producing a gaussian
+    # kernel density estimate on a regular grid
+
+    # Big kernel, use fft...
+    if kern_nx * kern_ny > np.product(gridsize) / 4.0:
+        grid = sp.signal.fftconvolve(grid, kernel, mode='same')
+    # Small kernel, use ndimage
+    else:
+        grid = sp.ndimage.convolve(grid, kernel, mode='constant', cval=0)
+
+    # Normalization factor to divide result by so that units are in the same
+    # units as scipy.stats.kde.gaussian_kde's output.
+    norm_factor = 2 * np.pi * cov * scotts_factor**2
+    norm_factor = np.linalg.det(norm_factor)
+    norm_factor = n * dx * dy * np.sqrt(norm_factor)
+
+    # Normalize the result
+    grid /= norm_factor
+
+    if sample:
+        i, j = ij.astype(int)
+        return grid, extents, grid[i, j]
+    else:
+        return grid, extents
+
+
+def _image_cov(data):
+    """Efficiently calculate the cov matrix of an image."""
+    def raw_moment(data, ix, iy, iord, jord):
+        data = data * ix**iord * iy**jord
+        return data.sum()
+
+    ni, nj = data.shape
+    iy, ix = np.mgrid[:ni, :nj]
+    data_sum = data.sum()
+
+    m10 = raw_moment(data, ix, iy, 1, 0)
+    m01 = raw_moment(data, ix, iy, 0, 1)
+    x_bar = m10 / data_sum
+    y_bar = m01 / data_sum
+
+    u11 = (raw_moment(data, ix, iy, 1, 1) - x_bar * m01) / data_sum
+    u20 = (raw_moment(data, ix, iy, 2, 0) - x_bar * m10) / data_sum
+    u02 = (raw_moment(data, ix, iy, 0, 2) - y_bar * m01) / data_sum
+
+    cov = np.array([[u20, u11], [u11, u02]])
+    return cov
+
+
+def _shift_cmap(cmap, start=0, midpoint=0.5, stop=1.0):
+    """Function to offset the "center" of a colormap.
+
+    Useful for data with a negative min and positive max and you want the
+    middle of the colormap's dynamic range to be at zero
+
+    From: https://stackoverflow.com/questions/7404116
+
+    Params
+    ------
+    cmap : matplotlib.cm type cmap
+        The cmap to be altered
+    start : float, optional
+        Offset from lowest point in the colormap's range.
+        Defaults to 0.0 (no lower ofset). Should be between
+        0.0 and `midpoint`.
+    midpoint : float, optional
+        The new center of the colormap. Defaults to 0.5 (no shift). Should be
+        between 0.0 and 1.0. In general, this should be  1 - vmax/(vmax +
+        abs(vmin)) For example if your data range from -15.0 to +5.0 and you
+        want the center of the colormap at 0.0, `midpoint` should be set to  1
+        - 5/(5 + 15)) or 0.75
+    stop : float, optional
+        Offset from highets point in the colormap's range.  Defaults to 1.0 (no
+        upper ofset). Should be between `midpoint` and 1.0.
+
+    Returns
+    -------
+    new_cmap : matplotlib.cm type cmap
+        Altered cmap
+    """
+    cdict = {
+        'red': [],
+        'green': [],
+        'blue': [],
+        'alpha': []
+    }
+
+    # regular index to compute the colors
+    reg_index = np.linspace(start, stop, 257)
+
+    # shifted index to match the data
+    shift_index = np.hstack([
+        np.linspace(0.0, midpoint, 128, endpoint=False),
+        np.linspace(midpoint, 1.0, 129, endpoint=True)
+    ])
+
+    for ri, si in zip(reg_index, shift_index):
+        r, g, b, a = cmap(ri)
+        cdict['red'].append((si, r, r))
+        cdict['green'].append((si, g, g))
+        cdict['blue'].append((si, b, b))
+        cdict['alpha'].append((si, a, a))
+
+    name = cmap.name + '_shifted'
+
+    new_cmap = colors.LinearSegmentedColormap(name, cdict)
+
+    return new_cmap
+
 
 def get_labels(labels, x, y, lim, log_scale):
     """Choose most interesting labels."""
