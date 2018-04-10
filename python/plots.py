@@ -3,17 +3,19 @@ A collection of plotting functions to use with pandas, numpy, and pyplot.
 
        Created: 2016-36-28 11:10
 """
+import sys
 from operator import itemgetter
 from itertools import groupby, cycle
 
 import numpy as np
+import scipy as sp
 import scipy.stats as sts
-from scipy.stats import gaussian_kde
 import pandas as pd
 
 import statsmodels.api as sm
 from statsmodels.sandbox.regression.predstd import wls_prediction_std
 
+from matplotlib import colors
 from matplotlib import gridspec
 from matplotlib import pyplot as plt
 import matplotlib.patches as mpatches
@@ -22,6 +24,8 @@ import seaborn as sns
 
 import networkx as nx
 from adjustText import adjust_text
+
+import matplotlib_venn
 
 # Get rid of pandas future warnings
 import warnings as _warn
@@ -143,7 +147,7 @@ class LinearRegression(object):
         self.rsquared = self.fitted.rsquared
         self.P = self.fitted.pvalues.tolist()[0]
 
-    def plot_reg_line(self, ax, alpha=0.6, zorder=10, color=None,
+    def plot_reg_line(self, ax, alpha=0.7, zorder=12, color=None,
                       include_label=True, unlog=False):
         """Plot the regression line."""
         color = color if color else 'darkorchid'
@@ -155,7 +159,7 @@ class LinearRegression(object):
             label=label, alpha=alpha, zorder=zorder
         )
 
-    def plot_ci_line(self, ax, alpha=0.2, zorder=10, color=None, unlog=False):
+    def plot_ci_line(self, ax, alpha=0.3, zorder=10, color=None, unlog=False):
         """Plot the confidence interval lines."""
         color = color if color else sns.xkcd_rgb['rust']
         x_pred = 10**self.x_pred if unlog else self.x_pred
@@ -166,7 +170,7 @@ class LinearRegression(object):
             alpha=alpha, zorder=zorder
         )
 
-    def plot_pred_line(self, ax, alpha=0.1, zorder=-5, color=None, unlog=False):
+    def plot_pred_line(self, ax, alpha=0.2, zorder=5, color=None, unlog=False):
         """Plot the confidence interval lines."""
         color = color if color else sns.xkcd_rgb['light green']
         x_pred = 10**self.x_pred if unlog else self.x_pred
@@ -507,19 +511,246 @@ def distcomp(y, x=None, bins=100, kind='qq', style=None,
     return fig, ax
 
 
+def fast_kde(x, y, gridsize=(400, 400), extents=None, weights=None,
+             sample=False):
+    """
+    Performs a gaussian kernel density estimate over a regular grid.
+
+    Uses a convolution of the gaussian kernel with a 2D histogram of the data.
+    This function is typically several orders of magnitude faster than
+    scipy.stats.kde.gaussian_kde for large (>1e7) numbers of points and
+    produces an essentially identical result.
+
+    Written by Joe Kington, available here:
+        https://gist.github.com/joferkington/d95101a61a02e0ba63e5
+
+    Params
+    ------
+    x: array-like
+        The x-coords of the input data points
+    y: array-like
+        The y-coords of the input data points
+    gridsize: tuple, optional
+        An (nx,ny) tuple of the size of the output
+        grid. Defaults to (400, 400).
+    extents: tuple, optional
+        A (xmin, xmax, ymin, ymax) tuple of the extents of output grid.
+        Defaults to min/max of x & y input.
+    weights: array-like or None, optional
+        An array of the same shape as x & y that weighs each sample (x_i,
+        y_i) by each value in weights (w_i).  Defaults to an array of ones
+        the same size as x & y.
+    sample: boolean
+        Whether or not to return the estimated density at each location.
+        Defaults to False
+
+    Returns
+    -------
+    density : 2D array of shape *gridsize*
+        The estimated probability distribution function on a regular grid
+    extents : tuple
+        xmin, xmax, ymin, ymax
+    sampled_density : 1D array of len(*x*)
+        Only returned if *sample* is True.  The estimated density at each
+        point.
+    """
+    #---- Setup --------------------------------------------------------------
+    x, y = np.atleast_1d([x, y])
+    x, y = x.reshape(-1), y.reshape(-1)
+
+    if x.size != y.size:
+        raise ValueError('Input x & y arrays must be the same size!')
+
+    nx, ny = gridsize
+    n = x.size
+
+    if weights is None:
+        # Default: Weight all points equally
+        weights = np.ones(n)
+    else:
+        weights = np.squeeze(np.asarray(weights))
+        if weights.size != x.size:
+            raise ValueError('Input weights must be an array of the same size'
+                    ' as input x & y arrays!')
+
+    # Default extents are the extent of the data
+    if extents is None:
+        xmin, xmax = x.min(), x.max()
+        ymin, ymax = y.min(), y.max()
+    else:
+        xmin, xmax, ymin, ymax = map(float, extents)
+    extents = xmin, xmax, ymin, ymax
+    dx = (xmax - xmin) / (nx - 1)
+    dy = (ymax - ymin) / (ny - 1)
+
+    #---- Preliminary Calculations -------------------------------------------
+
+    # Most of this is a hack to re-implment np.histogram2d using `coo_matrix`
+    # for better memory/speed performance with huge numbers of points.
+
+    # First convert x & y over to pixel coordinates
+    # (Avoiding np.digitize due to excessive memory usage!)
+    ij = np.column_stack((y, x))
+    ij -= [ymin, xmin]
+    ij /= [dy, dx]
+    ij = np.floor(ij, ij).T
+
+    # Next, make a 2D histogram of x & y
+    # Avoiding np.histogram2d due to excessive memory usage with many points
+    grid = sp.sparse.coo_matrix((weights, ij), shape=(ny, nx)).toarray()
+
+    # Calculate the covariance matrix (in pixel coords)
+    cov = _image_cov(grid)
+
+    # Scaling factor for bandwidth
+    scotts_factor = np.power(n, -1.0 / 6) # For 2D
+
+    #---- Make the gaussian kernel -------------------------------------------
+
+    # First, determine how big the kernel needs to be
+    std_devs = np.diag(np.sqrt(cov))
+    kern_nx, kern_ny = np.round(scotts_factor * 2 * np.pi * std_devs)
+    kern_nx, kern_ny = int(kern_nx), int(kern_ny)
+
+    # Determine the bandwidth to use for the gaussian kernel
+    inv_cov = np.linalg.inv(cov * scotts_factor**2)
+
+    # x & y (pixel) coords of the kernel grid, with <x,y> = <0,0> in center
+    xx = np.arange(kern_nx, dtype=np.float) - kern_nx / 2.0
+    yy = np.arange(kern_ny, dtype=np.float) - kern_ny / 2.0
+    xx, yy = np.meshgrid(xx, yy)
+
+    # Then evaluate the gaussian function on the kernel grid
+    kernel = np.vstack((xx.flatten(), yy.flatten()))
+    kernel = np.dot(inv_cov, kernel) * kernel
+    kernel = np.sum(kernel, axis=0) / 2.0
+    kernel = np.exp(-kernel)
+    kernel = kernel.reshape((kern_ny, kern_nx))
+
+    #---- Produce the kernel density estimate --------------------------------
+
+    # Convolve the gaussian kernel with the 2D histogram, producing a gaussian
+    # kernel density estimate on a regular grid
+
+    # Big kernel, use fft...
+    if kern_nx * kern_ny > np.product(gridsize) / 4.0:
+        grid = sp.signal.fftconvolve(grid, kernel, mode='same')
+    # Small kernel, use ndimage
+    else:
+        grid = sp.ndimage.convolve(grid, kernel, mode='constant', cval=0)
+
+    # Normalization factor to divide result by so that units are in the same
+    # units as scipy.stats.kde.gaussian_kde's output.
+    norm_factor = 2 * np.pi * cov * scotts_factor**2
+    norm_factor = np.linalg.det(norm_factor)
+    norm_factor = n * dx * dy * np.sqrt(norm_factor)
+
+    # Normalize the result
+    grid /= norm_factor
+
+    if sample:
+        i, j = ij.astype(int)
+        return grid, extents, grid[i, j]
+    else:
+        return grid, extents
+
+
+def _image_cov(data):
+    """Efficiently calculate the cov matrix of an image."""
+    def raw_moment(data, ix, iy, iord, jord):
+        data = data * ix**iord * iy**jord
+        return data.sum()
+
+    ni, nj = data.shape
+    iy, ix = np.mgrid[:ni, :nj]
+    data_sum = data.sum()
+
+    m10 = raw_moment(data, ix, iy, 1, 0)
+    m01 = raw_moment(data, ix, iy, 0, 1)
+    x_bar = m10 / data_sum
+    y_bar = m01 / data_sum
+
+    u11 = (raw_moment(data, ix, iy, 1, 1) - x_bar * m01) / data_sum
+    u20 = (raw_moment(data, ix, iy, 2, 0) - x_bar * m10) / data_sum
+    u02 = (raw_moment(data, ix, iy, 0, 2) - y_bar * m01) / data_sum
+
+    cov = np.array([[u20, u11], [u11, u02]])
+    return cov
+
+
+def _shift_cmap(cmap, start=0, midpoint=0.5, stop=1.0):
+    """Function to offset the "center" of a colormap.
+
+    Useful for data with a negative min and positive max and you want the
+    middle of the colormap's dynamic range to be at zero
+
+    From: https://stackoverflow.com/questions/7404116
+
+    Params
+    ------
+    cmap : matplotlib.cm type cmap
+        The cmap to be altered
+    start : float, optional
+        Offset from lowest point in the colormap's range.
+        Defaults to 0.0 (no lower ofset). Should be between
+        0.0 and `midpoint`.
+    midpoint : float, optional
+        The new center of the colormap. Defaults to 0.5 (no shift). Should be
+        between 0.0 and 1.0. In general, this should be  1 - vmax/(vmax +
+        abs(vmin)) For example if your data range from -15.0 to +5.0 and you
+        want the center of the colormap at 0.0, `midpoint` should be set to  1
+        - 5/(5 + 15)) or 0.75
+    stop : float, optional
+        Offset from highets point in the colormap's range.  Defaults to 1.0 (no
+        upper ofset). Should be between `midpoint` and 1.0.
+
+    Returns
+    -------
+    new_cmap : matplotlib.cm type cmap
+        Altered cmap
+    """
+    cdict = {
+        'red': [],
+        'green': [],
+        'blue': [],
+        'alpha': []
+    }
+
+    # regular index to compute the colors
+    reg_index = np.linspace(start, stop, 257)
+
+    # shifted index to match the data
+    shift_index = np.hstack([
+        np.linspace(0.0, midpoint, 128, endpoint=False),
+        np.linspace(midpoint, 1.0, 129, endpoint=True)
+    ])
+
+    for ri, si in zip(reg_index, shift_index):
+        r, g, b, a = cmap(ri)
+        cdict['red'].append((si, r, r))
+        cdict['green'].append((si, g, g))
+        cdict['blue'].append((si, b, b))
+        cdict['alpha'].append((si, a, a))
+
+    name = cmap.name + '_shifted'
+
+    new_cmap = colors.LinearSegmentedColormap(name, cdict)
+
+    return new_cmap
+
+
 def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
-            density=True, log_scale=False, regression=True, fill_reg=True,
-            reg_details=True, labels=None, label_lim=10, shift_labels=False,
-            highlight=None, highlight_label=None, legend='best', add_text=None,
-            scale_factor=0.02, size=10, lock_axes=True, fig=None, ax=None):
+            density=True, log_scale=False, handle_nan=True, regression=True,
+            fill_reg=True, reg_details=True, labels=None, label_lim=10,
+            shift_labels=False, highlight=None, highlight_label=None,
+            legend='best', add_text=None, scale_factor=0.05, size=10,
+            cmap=None, cmap_midpoint=0.5, lock_axes=True, fig=None, ax=None):
     """Create a simple 1:1 scatter plot plus regression line.
 
     Always adds a 1-1 line in grey and a regression line in green.
 
     Can color the points by density if density is true (otherwise they are
     always blue), can also do regular or negative log scaling.
-
-    Density defaults to true, it can be fairly slow if there are many points.
 
     Regression is done using the statsmodels OLS regression with a constant
     added to the X values using sm.add_constant() to add a column of ones to
@@ -539,10 +770,13 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         Name of the plot
     pval : float, optional
         Draw a line at this point*point count
-    density : bool, optional
-        Color points by density
+    density : bool or str, optional
+        Color points by density, 'kde' uses a cool kde method, but is too slow
+        on large datasets
     log_scale : str, optional
         Plot in log scale, can also be 'negative' for negative log scale.
+    handle_nan : bool, optional
+        When converting data to log, drop nan and inf values
     regression : bool, optional
         Do a regression
     fill_reg : bool, optional
@@ -561,10 +795,16 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         The location to place the legend
     add_text : str, optional
         Text to add to the legend
-    scale_factor : float
+    scale_factor : float, optional
         A ratio to expand the axes by.
-    size : int or tuple
+    size : int or tuple, optional
         Size of figure, defaults to square unless (x, y) length tuple given
+    cmap : str or cmap, optional
+        A cmap to use for density, defaults to a custom blue->red, light->dark
+        cmap
+    cmap_midpoint : float 0 <= n <= 1, optional
+        A midpoint for the cmap, 0.5 means no change
+        emphasizes density
     lock_axes : bool, optional
         Make X and Y axes the same length
     fig/ax : matplotlib objects, optional
@@ -594,53 +834,80 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     elif df is not None:
         raise ValueError('df must be a DataFrame or None')
 
+    if not xlabel and hasattr(x, 'name'):
+        xlabel = x.name
+    if not ylabel and hasattr(y, 'name'):
+        ylabel = y.name
+
+    if not xlabel:
+        xlabel = 'X'
+    if not ylabel:
+        ylabel = 'Y'
+
+    if hasattr(x, 'astype'):
+        x = x.astype(np.float)
+    else:
+        x = np.float(x)
+    if hasattr(y, 'astype'):
+        y = y.astype(np.float)
+    else:
+        y = np.float(y)
+
+    # Default to KDE density for fewer than 10k points, over that too slow
+    if density and density != 'kde' and len(x) <= 10000:
+        density = 'kde'
+
     # Get a color iterator
     c = iter(sns.color_palette())
-    pc = next(c)
-    preg = sns.xkcd_rgb['light maroon']
 
     # Set up log scaling if necessary
     if log_scale:
+        if log_scale == 'reverse' or log_scale == 'n' or log_scale == 'r':
+            log_scale = 'negative'
+        if log_scale == '-':
+            log_scale = 'negative'
         lx = np.log10(x)
         ly = np.log10(y)
-        # Replace infinate with 0
-        lx = np.nan_to_num(lx)
-        ly = np.nan_to_num(ly)
-        mx = max(np.max(lx), np.max(ly))
-        mn = min(np.min(lx), np.min(ly))
-        if scale_factor:
-            scale = abs(mx-mn)*scale_factor
-            mxs = 10**(mx+scale)
-            mns = 10**(mn-scale)
-        else:
-            mxs = 10**mx
-            mns = 10**mn
-        if mns == np.inf:
-            mns = 0
-        mlim = (mns, mxs)
+        if handle_nan:
+            tdf = pd.DataFrame([x, y, lx, ly]).T
+            tdf.columns = ['x', 'y', 'lx', 'ly']
+            tdf = tdf.replace([np.inf, -np.inf], np.nan).dropna()
+            sys.stderr.write(
+                'Dropped {0} nan/inf vals from data\n'.format(len(x)-len(tdf))
+            )
+            x, y, lx, ly = tdf.x, tdf.y, tdf.lx, tdf.ly
+            x.name = xlabel
+            y.name = ylabel
+            lx.name = xlabel
+            ly.name = ylabel
+        # Get limits
+        xlim, ylim, mlim = get_limits(lx, ly, scale_factor=scale_factor)
+        xlim = (10**xlim[0], 10**xlim[1])
+        ylim = (10**ylim[0], 10**ylim[1])
+        mlim = (10**mlim[0], 10**mlim[1])
         # Do the regression
         if regression:
             reg = LinearRegression(lx, ly)
     # No log
     else:
-        mx = max(np.max(x), np.max(y))
-        mn = min(np.min(x), np.min(y))
-        if scale_factor:
-            scale = abs(mx-mn)*scale_factor
-            mlim = (mn+scale, mx+scale)
-        else:
-            mlim = (mn, mx)
+        # Get limits
+        xlim, ylim, mlim = get_limits(x, y, scale_factor=scale_factor)
         # Do the regression
         if regression:
             reg = LinearRegression(x, y)
+
+    # If we are locking the axes, then all limits are the same
+    if lock_axes:
+        xlim = mlim
+        ylim = mlim
 
     # Plot the regression on top
     if regression:
         if reg_details:
             reg.print_reg_summary()
-        reg.plot_reg_line(ax=a, color=preg, unlog=log_scale)
+        reg.plot_reg_line(ax=a, unlog=log_scale)
         if fill_reg:
-            reg.plot_ci_line(ax=a, unlog=log_scale)
+            #  reg.plot_ci_line(ax=a, unlog=log_scale)
             reg.plot_pred_line(ax=a, unlog=log_scale)
     else:
         reg = None
@@ -653,10 +920,10 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             a.plot(mlim, (pval, pval), color='0.5', alpha=0.3)
             a.plot((pval, pval), mlim, color='0.6', alpha=0.5)
             if log_scale == 'negative':
-                mxa = mx+1.25
+                mxa = mlim[1]+1.25
                 tpos = 10**(mxa)
             elif log_scale:
-                mna = mn-1.25
+                mna = mlim[0]-1.25
                 tpos = 10**(mna)
             else:
                 tpos = mlim[0] - (mlim[0] * .1)
@@ -671,36 +938,47 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             a.plot(both.x, both.y, 'o', c=sns.xkcd_rgb['lilac'], alpha=0.2,
                 label='goaway')
 
-    # Density plot
+    # Actual scatter plot
+    scatter_args = dict(
+        marker='.', edgecolor='', label=None, picker=True, alpha=0.5
+    )
     if density:
+        if not cmap:
+            density_colors = dict(
+                n_colors=16, start=2.0, rot=1.8, light=0.65, dark=0.3
+            )
+            cmap = sns.cubehelix_palette(**density_colors, as_cmap=True)
+        if round(cmap_midpoint, 2) != 0.5:
+            cmap = _shift_cmap(cmap, midpoint=cmap_midpoint)
+        # Use kde of 10k points
         if log_scale:
-            i = lx
-            j = ly
+            cols = [lx, ly, x, y]
+            coll = [xlabel, ylabel, 'orig_x', 'orig_y']
         else:
-            i = x
-            j = y
-        xy = np.vstack([i, j])
-        try:
-            z = gaussian_kde(xy)(xy)
-            # Sort the points by density, so that the densest points are
-            # plotted last
-            idx = z.argsort()
-            x2, y2, z = x[idx], y[idx], z[idx]
-            s = a.scatter(
-                x2, y2, c=z, s=50, cmap=sns.cubehelix_palette(8, as_cmap=True),
-                edgecolor='', label=None, picker=True, zorder=2
+            cols = [x, y]
+            coll = [xlabel, ylabel]
+        cdf = pd.DataFrame(cols).T
+        cdf.columns = coll
+
+        # Plot density using estimate
+        if len(cdf) > 0:
+            cx, cy = cdf[xlabel], cdf[ylabel]
+            # Plot remainder with fast kde
+            grid, extents, cz = fast_kde(cx, cy, sample=True)
+            idx = cz.argsort()
+            if 'orig_x' in cdf.columns:
+                x3, y3, z3 = cdf['orig_x'][idx], cdf['orig_y'][idx], cz[idx]
+            else:
+                x3, y3, z3 = cx[idx], cy[idx], cz[idx]
+            #f.colorbar(grid, ax=a, orientation='vertical', shrink=0.75, pad=0.05)
+            a.scatter(
+                x3, y3, c=z3, cmap=cmap, zorder=2, **scatter_args
             )
-        except (ValueError, np.linalg.linalg.LinAlgError):
-            # Too small for density
-            s = a.scatter(
-                x, y, cmap=sns.cubehelix_palette(8, as_cmap=True),
-                edgecolor='', label=None, picker=True, zorder=2
-            )
+
     else:
         # Plot the points as blue dots
-        s = a.scatter(
-            x, y, color=pc, edgecolor='', label=None,
-            picker=True, zorder=2
+        a.scatter(
+            x, y, color=cmap.colors[0], zorder=2, **scatter_args
         )
 
     if highlight is not None:
@@ -712,13 +990,13 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             highlight_label
         )
 
+    # Plot a 1-1 line in the background
+    one_line = (max(xlim[0], ylim[0]), min(xlim[1], ylim[1]))
+    a.plot(one_line, one_line, '-', color='0.85', zorder=1000)
+
+    # Apply log prior to adding text and labels
     if log_scale:
         a.loglog()
-
-    # Plot a 1-1 line in the background if axes locked
-    if lock_axes:
-        print(mlim)
-        a.plot(mlim, mlim, '-', color='0.75', zorder=1000)
 
     handles, labls = a.get_legend_handles_labels()
     rm = []
@@ -757,10 +1035,11 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
                     arrowprops=dict(arrowstyle="->", color=next(c), lw=0.5)
                 )
 
-    if lock_axes:
-        a.set_xlim(mlim)
-        a.set_ylim(mlim)
+    # Box in the axes
+    a.set_xlim(xlim)
+    a.set_ylim(ylim)
 
+    # Invert zxes if necessary
     if log_scale == 'negative':
         a.invert_xaxis()
         a.invert_yaxis()
@@ -778,96 +1057,70 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     return f, a, reg
 
 
-def get_labels(labels, x, y, lim, log_scale):
-    """Choose most interesting labels."""
-    p = pd.concat([pd.Series(labels).reset_index(drop=True),
-                   pd.Series(x).reset_index(drop=True),
-                   pd.Series(y).reset_index(drop=True)], axis=1)
-    p.columns = ['label', 'x', 'y']
-    # Add calculation columns
-    p['small'] = p.x*p.y
-    p['interesting'] = (
-        (p.small.apply(lambda x: 1/x)) *
-        10**np.abs(np.log10(p.x) - np.log10(p.y))
-    )
-    if log_scale:
-        p['diff'] = np.log10(p.x) - np.log10(p.y)
-        p['adiff'] = np.log10(p.y) - np.log10(p.x)
+###############################################################################
+#                               Compound Plots                                #
+###############################################################################
+
+
+def compare_overlapping_dfs(df1, df2, labels, col=None, orient='vertical'):
+    """Make venn diagram and scatter plot from two Series.
+
+    Params
+    ------
+    df{1/2} : DataFrames with identical indices
+    labels : (str, str)
+        Labels for the two dfs
+    col : str, optional
+        Optional column to compare, will plot a scatter plot alongside the
+        venn diagram
+    orient : {vertical, horizontal}, optional
+        Stack graphs or place next to each other, if plotting two plots
+
+    Returns
+    -------
+    comb : pandas.core.DataFrame
+        Combined dataframe
+    fig : plt.figure
+    ax : plt.axes
+    reg : plots.LinearRegression or None
+        Statsmodel OLS regression results wrapped in a LinearRegression
+        object. None if col is not provided.
+    """
+    sns.set_style('white')
+    if col is None:
+        fig, ax = plt.subplots(figsize=(12,12))
+        venn_ax = ax
     else:
-        p['diff'] = p.x - p.y
-        p['adiff'] = p.y - p.x
-    # Get top smallest pvalues first 5% of points
-    p = p.sort_values('small', ascending=True)
-    labels = pick_top(p, lim*0.05)
-    # Get most different and significant 55% of points
-    p = p.sort_values('interesting', ascending=False)
-    labels += pick_top(p, lim*0.55, labels)
-    # Get most above line, 20% of points
-    p = p.sort_values('diff', ascending=True)
-    labels += pick_top(p, lim*0.2, labels)
-    # Get most below line, 20% of points
-    p = p.sort_values('adiff', ascending=True)
-    labels += pick_top(p, lim*0.2, labels)
-    return labels
+        if orient == 'vertical' or orient == 'v':
+            fig, ax = plt.subplots(
+                2, 1, figsize=(12, 24), sharex=False, sharey=False
+            )
+        elif orient == 'horizontal' or orient == 'h':
+            fig, ax = plt.subplots(
+                1, 2, figsize=(20, 10), sharex=False, sharey=False
+            )
+        else:
+            raise ValueError("orient must be one of {'vertical', 'horizontal'}")
+        venn_ax = ax[0]
+        sax = ax[1]
 
+    fig, venn_ax, venn = venn_diagram(
+        [df1.index.to_series(), df2.index.to_series()],
+        labels=labels, fig=fig, ax=venn_ax
+    )
 
-def pick_top(p, lim, locs=None):
-    """Pick top points if they aren't already in locs."""
-    locs  = locs if locs else []
-    text  = []
-    count = 0
-    for l in p.index.to_series().tolist():
-        loc = (float(p.loc[l]['x']), float(p.loc[l]['y']), p.loc[l]['label'])
-        if loc in locs:
-            continue
-        locs.append(loc)
-        text.append(loc)
-        count += 1
-        if count >= lim:
-            break
-    return text
+    # Combine the dfs
+    suf = ['_{0}'.format(i) for i in labels]
+    df = pd.merge(df1, df2, left_index=True, right_index=True, suffixes=suf)
 
+    # Do a scatter plot if requested
+    if col is not None:
+        lab = ['{0}_{1}'.format(col, i) for i in labels]
+        fig, sax, reg = scatter(x=lab[0], y=lab[1], df=df, fig=fig, ax=sax)
+    else:
+        reg = None
 
-def repel_labels(ax, text, k=0.01):
-    G = nx.DiGraph()
-    data_nodes = []
-    init_pos = {}
-    for xi, yi, label in text:
-        data_str = 'data_{0}'.format(label)
-        G.add_node(data_str)
-        G.add_node(label)
-        G.add_edge(label, data_str)
-        data_nodes.append(data_str)
-        init_pos[data_str] = (xi, yi)
-        init_pos[label] = (xi, yi)
-
-    pos = nx.spring_layout(G, pos=init_pos, fixed=data_nodes, k=k)
-
-    # undo spring_layout's rescaling
-    pos_after = np.vstack([pos[d] for d in data_nodes])
-    pos_before = np.vstack([init_pos[d] for d in data_nodes])
-    scale, shift_x = np.polyfit(pos_after[:,0], pos_before[:,0], 1)
-    scale, shift_y = np.polyfit(pos_after[:,1], pos_before[:,1], 1)
-    shift = np.array([shift_x, shift_y])
-    for key, val in pos.items():
-        pos[key] = (val*scale) + shift
-
-    for label, data_str in G.edges():
-        ax.annotate(label,
-                    xy=pos[data_str], xycoords='data',
-                    xytext=pos[label], textcoords='data',
-                    #  arrowprops=dict(arrowstyle="->",
-                                    #  shrinkA=0, shrinkB=0,
-                                    #  connectionstyle="arc3",
-                                    #  color='red'),
-                    )
-    # expand limits
-    all_pos = np.vstack(pos.values())
-    x_span, y_span = np.ptp(all_pos, axis=0)
-    mins = np.min(all_pos-x_span*0.15, 0)
-    maxs = np.max(all_pos+y_span*0.15, 0)
-    ax.set_xlim([mins[0], maxs[0]])
-    ax.set_ylim([mins[1], maxs[1]])
+    return df, fig, ax, reg
 
 
 ###############################################################################
@@ -946,6 +1199,43 @@ def boxplot(data, ylabel, title, box_width=0.35, log_scale=False,
 ###############################################################################
 #                              Specialized Plots                              #
 ###############################################################################
+
+
+def venn_diagram(sets, labels=None, fig=None, ax=None, size=12):
+    """Draw a venn diagram from either 2 or 3 sets.
+
+    Params
+    ------
+    sets : list of sets or Series
+        List of at least two sets to diagram
+    labels : list of str
+        List of same length as sets, names for sets
+
+    Returns
+    -------
+    fig, ax, VennDiagram
+    """
+    f, a = _get_fig_ax(fig, ax, size=size)
+    if labels:
+        assert len(labels) == len(sets)
+    else:
+        labels = []
+        for i, s in enumerate(sets):
+            if hasattr(s, 'name'):
+                labels.append(s.name)
+            else:
+                labels.append('Set_{0}'.format(i))
+    fsets = []
+    for s in sets:
+        fsets.append(set(s))
+    if len(sets) == 2:
+        venn = matplotlib_venn.venn2(fsets, set_labels=labels, ax=a)
+    elif len(sets) == 3:
+        venn = matplotlib_venn.venn3(fsets, set_labels=labels, ax=a)
+    else:
+        raise ValueError('Can only handle sets of two or three.')
+
+    return f, a, venn
 
 
 def manhattan(chrdict, title=None, xlabel='genome', ylabel='values',
@@ -1082,6 +1372,148 @@ def manhattan(chrdict, title=None, xlabel='genome', ylabel='values',
 #                              Private Functions                              #
 ###############################################################################
 
+def get_labels(labels, x, y, lim, log_scale):
+    """Choose most interesting labels."""
+    p = pd.concat([pd.Series(labels).reset_index(drop=True),
+                   pd.Series(x).reset_index(drop=True),
+                   pd.Series(y).reset_index(drop=True)], axis=1)
+    p.columns = ['label', 'x', 'y']
+    # Add calculation columns
+    p['small'] = p.x*p.y
+    p['interesting'] = (
+        (p.small.apply(lambda x: 1/x)) *
+        10**np.abs(np.log10(p.x) - np.log10(p.y))
+    )
+    if log_scale:
+        p['diff'] = np.log10(p.x) - np.log10(p.y)
+        p['adiff'] = np.log10(p.y) - np.log10(p.x)
+    else:
+        p['diff'] = p.x - p.y
+        p['adiff'] = p.y - p.x
+    # Get top smallest pvalues first 5% of points
+    p = p.sort_values('small', ascending=True)
+    labels = pick_top(p, lim*0.05)
+    # Get most different and significant 55% of points
+    p = p.sort_values('interesting', ascending=False)
+    labels += pick_top(p, lim*0.55, labels)
+    # Get most above line, 20% of points
+    p = p.sort_values('diff', ascending=True)
+    labels += pick_top(p, lim*0.2, labels)
+    # Get most below line, 20% of points
+    p = p.sort_values('adiff', ascending=True)
+    labels += pick_top(p, lim*0.2, labels)
+    return labels
+
+
+def pick_top(p, lim, locs=None):
+    """Pick top points if they aren't already in locs."""
+    locs  = locs if locs else []
+    text  = []
+    count = 0
+    for l in p.index.to_series().tolist():
+        loc = (float(p.loc[l]['x']), float(p.loc[l]['y']), p.loc[l]['label'])
+        if loc in locs:
+            continue
+        locs.append(loc)
+        text.append(loc)
+        count += 1
+        if count >= lim:
+            break
+    return text
+
+
+def repel_labels(ax, text, k=0.01):
+    G = nx.DiGraph()
+    data_nodes = []
+    init_pos = {}
+    for xi, yi, label in text:
+        data_str = 'data_{0}'.format(label)
+        G.add_node(data_str)
+        G.add_node(label)
+        G.add_edge(label, data_str)
+        data_nodes.append(data_str)
+        init_pos[data_str] = (xi, yi)
+        init_pos[label] = (xi, yi)
+
+    pos = nx.spring_layout(G, pos=init_pos, fixed=data_nodes, k=k)
+
+    # undo spring_layout's rescaling
+    pos_after = np.vstack([pos[d] for d in data_nodes])
+    pos_before = np.vstack([init_pos[d] for d in data_nodes])
+    scale, shift_x = np.polyfit(pos_after[:,0], pos_before[:,0], 1)
+    scale, shift_y = np.polyfit(pos_after[:,1], pos_before[:,1], 1)
+    shift = np.array([shift_x, shift_y])
+    for key, val in pos.items():
+        pos[key] = (val*scale) + shift
+
+    for label, data_str in G.edges():
+        ax.annotate(label,
+                    xy=pos[data_str], xycoords='data',
+                    xytext=pos[label], textcoords='data',
+                    #  arrowprops=dict(arrowstyle="->",
+                                    #  shrinkA=0, shrinkB=0,
+                                    #  connectionstyle="arc3",
+                                    #  color='red'),
+                    )
+    # expand limits
+    all_pos = np.vstack(pos.values())
+    x_span, y_span = np.ptp(all_pos, axis=0)
+    mins = np.min(all_pos-x_span*0.15, 0)
+    maxs = np.max(all_pos+y_span*0.15, 0)
+    ax.set_xlim([mins[0], maxs[0]])
+    ax.set_ylim([mins[1], maxs[1]])
+
+
+def scale_val(val, factor, direction):
+    """Scale val by factor either 'up' or 'down'."""
+    if direction == 'up':
+        return val+(val*factor)
+    if direction == 'down':
+        return val-(val*factor)
+    raise ValueError('direction must be "up" or "down"')
+
+
+def scale_rng(rng, factor):
+    """Scale (low, hi), by factor in direction (down, up)."""
+    if rng[0] > 0:
+        fac = (rng[0]-rng[1])*factor
+    else:
+        fac = (rng[1]-rng[0])*factor
+    lw, hi = rng[0]-fac, rng[1]+fac
+    # Try to handle infinates by individual scaling
+    if abs(lw) == np.inf:
+        lw = scale_val(rng[0], factor, 'down')
+    if abs(hi) == np.inf:
+        hi = scale_val(rng[1], factor, 'up')
+    # If still infinate, just use the unscaled value
+    if abs(lw) == np.inf:
+        sys.stderr.write('Scaled low value was infinate, unscaling\n')
+        lw = rng[0]
+    if abs(hi) == np.inf:
+        sys.stderr.write('Scaled high value was infinate, unscaling\n')
+        hi = rng[1]
+    return lw, hi
+
+
+def get_limits(x, y, scale_factor=0.05):
+    """Return xlim, ylim, mlim."""
+    xlim = (np.min(x), np.max(x))
+    ylim = (np.min(y), np.max(y))
+    mn = min(xlim[0], ylim[0])
+    mx = max(xlim[1], ylim[1])
+    mlim = (mn, mx)
+    if mn == np.inf:
+        mn = 0
+    if xlim[0] == np.inf:
+        xlim[0] = 0
+    if ylim[0] == np.inf:
+        ylim[0] = 0
+    if scale_factor:
+        xlim = scale_rng(xlim, factor=scale_factor)
+        ylim = scale_rng(ylim, factor=scale_factor)
+        mlim = scale_rng(mlim, factor=scale_factor)
+    return xlim, ylim, mlim
+
 
 def uniform_bins(seq, bins=100):
     """Returns unique bin edges for an iterable of numbers.
@@ -1120,12 +1552,11 @@ def uniform_bins(seq, bins=100):
 
 def _get_fig_ax(fig, ax, size=9):
     """Check figure and axis, and create if none."""
-    if fig:
-        if bool(fig) == bool(ax):
-            f, a = (fig, ax)
-        else:
-            print('You must provide both fig and ax, not just one.')
-            raise Exception('You must provide both fig and ax, not just one.')
+    if fig and not ax:
+        ax = fig.axes
+    elif ax and not fig:
+        fig = ax.figure
+    if fig and ax:
         return fig, ax
     else:
         import seaborn as sns
