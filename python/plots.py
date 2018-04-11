@@ -15,6 +15,7 @@ import pandas as pd
 import statsmodels.api as sm
 from statsmodels.sandbox.regression.predstd import wls_prediction_std
 
+import matplotlib as mpl
 from matplotlib import colors
 from matplotlib import gridspec
 from matplotlib import pyplot as plt
@@ -529,7 +530,7 @@ def distcomp(y, x=None, bins=500, kind='qq', style=None, ylabel=None,
 
 def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
             density=True, log_scale=False, handle_nan=True, regression=True,
-            fill_reg=True, reg_details=True, labels=None, label_lim=10,
+            fill_reg=True, reg_details=False, labels=None, label_lim=10,
             shift_labels=False, highlight=None, highlight_label=None,
             legend='best', add_text=None, scale_factor=0.05, size=10,
             cmap=None, cmap_midpoint=0.5, lock_axes=True, fig=None, ax=None):
@@ -641,10 +642,6 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     else:
         y = np.float(y)
 
-    # Default to KDE density for fewer than 10k points, over that too slow
-    if density and density != 'kde' and len(x) <= 10000:
-        density = 'kde'
-
     # Get a color iterator
     c = iter(sns.color_palette())
 
@@ -672,7 +669,7 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
         xlim, ylim, mlim = get_limits(lx, ly, scale_factor=scale_factor)
         xlim = (10**xlim[0], 10**xlim[1])
         ylim = (10**ylim[0], 10**ylim[1])
-        mlim = (10**mlim[0], 10**mlim[1])
+        mlim = (min(xlim[0], ylim[0]), max(xlim[1], ylim[1]))
         # Do the regression
         if regression:
             reg = LinearRegression(lx, ly)
@@ -732,10 +729,19 @@ def scatter(x, y, df=None, xlabel=None, ylabel=None, title=None, pval=None,
     )
     if density:
         if not cmap:
+            cmap = 'plasma'
+        if cmap == 'spectrum':
             density_colors = dict(
                 n_colors=16, start=2.0, rot=1.8, light=0.65, dark=0.3
             )
             cmap = sns.cubehelix_palette(**density_colors, as_cmap=True)
+        elif cmap == 'purple':
+            density_colors = dict(
+                n_colors=16, start=1.8, rot=0.1
+            )
+            cmap = sns.cubehelix_palette(**density_colors, as_cmap=True)
+        elif isinstance(cmap, str):
+            cmap = getattr(mpl.cm, cmap)
         if round(cmap_midpoint, 2) != 0.5:
             cmap = _shift_cmap(cmap, midpoint=cmap_midpoint)
         # Use kde of 10k points
@@ -1517,19 +1523,12 @@ def get_limits(x, y, scale_factor=0.05):
     """Return xlim, ylim, mlim."""
     xlim = (np.min(x), np.max(x))
     ylim = (np.min(y), np.max(y))
-    mn = min(xlim[0], ylim[0])
-    mx = max(xlim[1], ylim[1])
-    mlim = (mn, mx)
-    if mn == np.inf:
-        mn = 0
-    if xlim[0] == np.inf:
-        xlim[0] = 0
-    if ylim[0] == np.inf:
-        ylim[0] = 0
     if scale_factor:
         xlim = scale_rng(xlim, factor=scale_factor)
         ylim = scale_rng(ylim, factor=scale_factor)
-        mlim = scale_rng(mlim, factor=scale_factor)
+    mn = min(xlim[0], ylim[0])
+    mx = max(xlim[1], ylim[1])
+    mlim = (mn, mx)
     return xlim, ylim, mlim
 
 
