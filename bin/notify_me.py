@@ -140,7 +140,7 @@ def main(argv=None):
 
     if args.email_addr:
         global SEND_ADDR
-        SEND_ADDR = args.email
+        SEND_ADDR = args.email_addr
     if args.push_key:
         global PUSH_KEY
         PUSH_KEY = args.push_key
