@@ -42,4 +42,13 @@ def replace_in_files(root_dir, old_string, new_string, dry_run=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Replace text in files recursively.")
     parser.add_argument("root_dir", nargs="?", default=".", help="Root directory to search (default: .)")
+    parser.add_argument("--dry-run", action="store_true", help="Perform a dry run (show changes without applying)")
 
+    args = parser.parse_args()
+
+    old_text = input("Enter the string to find: ")
+    new_text = input("Enter the string to replace it with: ")
+
+    replace_in_files(args.root_dir, old_text, new_text, dry_run=args.dry_run)
+
+    print("Replacement process complete.")
